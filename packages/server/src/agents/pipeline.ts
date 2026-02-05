@@ -12,14 +12,6 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
   const db = getDb();
   const config = loadConfig();
 
-  if (!config.apiKey) {
-    sseManager.emit(sessionId, {
-      type: 'status:error',
-      data: { stage, error: 'No API key configured. Set ANTHROPIC_API_KEY or configure in Settings.' },
-    });
-    return;
-  }
-
   try {
     switch (stage) {
       case 'taxonomy': {
@@ -35,7 +27,6 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
           sessionId,
           domain: session.domain,
           webSearch: sessionConfig.webSearch ?? false,
-          apiKey: config.apiKey,
           model: config.models.navigator,
         });
 
@@ -57,7 +48,6 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
           sessionId,
           coordinate: session.coordinate ?? '',
           methods: getAllMethods(),
-          apiKey: config.apiKey,
           model: config.models.strategist,
         });
 
@@ -91,7 +81,6 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
           coordinate: session.coordinate ?? '',
           domain: session.domain,
           methods: selectedMethods,
-          apiKey: config.apiKey,
           model: config.models.strategist,
         });
 
@@ -141,7 +130,6 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
           workerCount,
           ideasPerWorker,
           personas,
-          apiKey: config.apiKey,
           workerModel: config.models.worker,
           analystModel: config.models.analyst,
         });
@@ -185,7 +173,6 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
           methods: selectedMethods,
           workerCount: sessionConfig.workerCount ?? config.defaults.workerCount,
           ideas: ideaRows,
-          apiKey: config.apiKey,
           model: config.models.analyst,
         });
 

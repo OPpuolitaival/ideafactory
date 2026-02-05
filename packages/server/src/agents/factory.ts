@@ -6,6 +6,7 @@ import type { Method, Persona, Rubric, RawIdea, ScoredIdea } from '@ideafactory/
 import { RawIdeaSchema, ScoredIdeaSchema } from '@ideafactory/shared';
 import { z } from 'zod';
 import { callLLMWithRetry } from './llm.js';
+import { rawIdeaArrayJsonSchema, scoredIdeaArrayJsonSchema, qaResultArrayJsonSchema } from './schemas.js';
 import { sseManager } from '../sse/index.js';
 import { getDb, schema } from '../db/index.js';
 
@@ -28,7 +29,6 @@ interface RunFactoryOptions {
   workerCount: number;
   ideasPerWorker: number;
   personas: Persona[];
-  apiKey: string;
   workerModel: string;
   analystModel: string;
 }
@@ -43,7 +43,6 @@ export async function runFactory(options: RunFactoryOptions): Promise<void> {
     workerCount,
     ideasPerWorker,
     personas,
-    apiKey,
     workerModel,
     analystModel,
   } = options;
@@ -63,7 +62,6 @@ export async function runFactory(options: RunFactoryOptions): Promise<void> {
     workerCount,
     ideasPerWorker,
     personas,
-    apiKey,
     model: workerModel,
   });
 
@@ -77,7 +75,6 @@ export async function runFactory(options: RunFactoryOptions): Promise<void> {
     sessionId,
     ideas: allIdeas,
     rubric,
-    apiKey,
     model: analystModel,
   });
 
@@ -97,7 +94,6 @@ export async function runFactory(options: RunFactoryOptions): Promise<void> {
     survivors,
     rubric,
     coordinate,
-    apiKey,
     model: analystModel,
   });
 
@@ -116,7 +112,6 @@ export async function runFactory(options: RunFactoryOptions): Promise<void> {
     sessionId,
     concepts: evolved,
     rubric,
-    apiKey,
     model: analystModel,
   });
 }
@@ -132,7 +127,6 @@ interface DivergenceOptions {
   workerCount: number;
   ideasPerWorker: number;
   personas: Persona[];
-  apiKey: string;
   model: string;
 }
 
@@ -146,7 +140,6 @@ async function runDivergence(options: DivergenceOptions): Promise<RawIdea[]> {
     workerCount,
     ideasPerWorker,
     personas,
-    apiKey,
     model,
   } = options;
 
@@ -174,7 +167,6 @@ async function runDivergence(options: DivergenceOptions): Promise<RawIdea[]> {
 
       const ideas = await callLLMWithRetry(
         {
-          apiKey,
           model,
           system: `${IDEATION_SKILL}\n\n## Your Persona\n\n${persona.systemPrompt}`,
           prompt: `Generate ${ideasPerWorker} ideas for:
@@ -197,8 +189,7 @@ Requirements:
 - Lean into your ${persona.name} perspective
 
 Return ONLY a JSON array of idea objects.`,
-          temperature: 0.9,
-          maxTokens: 16384,
+          outputSchema: rawIdeaArrayJsonSchema,
           sessionId,
           agentName: `Worker ${i + 1} (${persona.name})`,
         },
@@ -256,14 +247,13 @@ interface ConvergenceOptions {
   sessionId: string;
   ideas: RawIdea[];
   rubric: Rubric;
-  apiKey: string;
   model: string;
 }
 
 async function runConvergence(
   options: ConvergenceOptions,
 ): Promise<{ survivors: ScoredIdea[]; eliminated: ScoredIdea[] }> {
-  const { sessionId, ideas, rubric, apiKey, model } = options;
+  const { sessionId, ideas, rubric, model } = options;
   const db = getDb();
 
   const ideaSummary = ideas
@@ -274,7 +264,6 @@ async function runConvergence(
 
   const scored = await callLLMWithRetry(
     {
-      apiKey,
       model,
       system: `${CRITIC_SKILL}\n\nYou are in CONVERGENCE MODE. Filter and score ideas.`,
       prompt: `Evaluate these ${ideas.length} ideas against the rubric.
@@ -303,8 +292,7 @@ Each object must have:
 - eliminationReason (string, if eliminated)
 
 Return ONLY the JSON array.`,
-      temperature: 0.5,
-      maxTokens: 16384,
+      outputSchema: scoredIdeaArrayJsonSchema,
       sessionId,
       agentName: 'Analyst',
     },
@@ -349,12 +337,11 @@ interface EvolutionOptions {
   survivors: ScoredIdea[];
   rubric: Rubric;
   coordinate: string;
-  apiKey: string;
   model: string;
 }
 
 async function runEvolution(options: EvolutionOptions): Promise<ScoredIdea[]> {
-  const { sessionId, survivors, rubric, coordinate, apiKey, model } = options;
+  const { sessionId, survivors, rubric, coordinate, model } = options;
   const db = getDb();
 
   const survivorText = survivors
@@ -369,7 +356,6 @@ async function runEvolution(options: EvolutionOptions): Promise<ScoredIdea[]> {
 
   const evolved = await callLLMWithRetry(
     {
-      apiKey,
       model,
       system: `You are an idea evolution specialist. Your job is to improve surviving concepts by addressing weaknesses, reducing complexity, increasing delight, and merging strong features across candidates.`,
       prompt: `Evolve these ${survivors.length} concepts for the coordinate "${coordinate}":
@@ -389,8 +375,7 @@ Return the same ScoredIdea JSON array format with updated descriptions and re-sc
 Each must retain the original id and sourceIds.
 
 Return ONLY the JSON array.`,
-      temperature: 0.7,
-      maxTokens: 8192,
+      outputSchema: scoredIdeaArrayJsonSchema,
       sessionId,
       agentName: 'Analyst',
     },
@@ -428,12 +413,11 @@ interface QAOptions {
   sessionId: string;
   concepts: ScoredIdea[];
   rubric: Rubric;
-  apiKey: string;
   model: string;
 }
 
 async function runQA(options: QAOptions): Promise<void> {
-  const { sessionId, concepts, rubric, apiKey, model } = options;
+  const { sessionId, concepts, rubric, model } = options;
   const db = getDb();
 
   const conceptText = concepts
@@ -444,7 +428,6 @@ async function runQA(options: QAOptions): Promise<void> {
 
   const qaResults = await callLLMWithRetry(
     {
-      apiKey,
       model,
       system: `${CRITIC_SKILL}\n\nYou are in QA MODE. Reality-check evolved concepts.`,
       prompt: `Perform QA critique on these ${concepts.length} evolved concepts:
@@ -463,8 +446,7 @@ NOT all concepts should get "strong". Be genuinely critical and discriminating.
 
 Return a JSON array of QAResult objects with conceptId matching the concept IDs above.
 Return ONLY the JSON array.`,
-      temperature: 0.5,
-      maxTokens: 8192,
+      outputSchema: qaResultArrayJsonSchema,
       sessionId,
       agentName: 'Analyst',
     },

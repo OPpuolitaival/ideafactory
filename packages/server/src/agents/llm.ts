@@ -1,39 +1,51 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { query } from '@anthropic-ai/claude-agent-sdk';
 import { sseManager } from '../sse/index.js';
 
-const clientCache = new Map<string, Anthropic>();
-
-function getClient(apiKey: string): Anthropic {
-  if (!clientCache.has(apiKey)) {
-    clientCache.set(apiKey, new Anthropic({ apiKey }));
-  }
-  return clientCache.get(apiKey)!;
-}
-
 export interface LLMCallOptions {
-  apiKey: string;
   model: string;
   system: string;
   prompt: string;
-  temperature?: number;
-  maxTokens?: number;
+  outputSchema?: Record<string, unknown>;
   sessionId?: string;
   agentName?: string;
+  timeoutMs?: number;
+}
+
+const AGENT_TIMEOUT_MS = 120_000;
+
+function isRateLimitError(error: unknown): boolean {
+  if (error instanceof Error && error.message.includes('429')) return true;
+  if (error instanceof Error && error.message.toLowerCase().includes('rate limit')) return true;
+  return false;
+}
+
+function isAuthError(error: unknown): boolean {
+  if (error instanceof Error && error.message.includes('401')) return true;
+  if (error instanceof Error && error.message.toLowerCase().includes('authentication')) return true;
+  if (error instanceof Error && error.message.toLowerCase().includes('unauthorized')) return true;
+  return false;
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function backoffWithJitter(attempt: number, baseMs = 1000): number {
+  const exponential = baseMs * Math.pow(2, attempt);
+  const jitter = Math.random() * exponential * 0.5;
+  return exponential + jitter;
 }
 
 export async function callLLM(options: LLMCallOptions): Promise<string> {
   const {
-    apiKey,
     model,
     system,
     prompt,
-    temperature = 0.7,
-    maxTokens = 8192,
+    outputSchema,
     sessionId,
     agentName,
+    timeoutMs = AGENT_TIMEOUT_MS,
   } = options;
-
-  const client = getClient(apiKey);
 
   if (sessionId && agentName) {
     sseManager.emit(sessionId, {
@@ -42,20 +54,50 @@ export async function callLLM(options: LLMCallOptions): Promise<string> {
     });
   }
 
-  const response = await client.messages.create({
-    model,
-    max_tokens: maxTokens,
-    temperature,
-    system,
-    messages: [{ role: 'user', content: prompt }],
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  const text = response.content
-    .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-    .map((block) => block.text)
-    .join('\n');
+  try {
+    const stream = query({
+      prompt,
+      options: {
+        model,
+        systemPrompt: system,
+        // When outputFormat uses json_schema, the SDK adds a StructuredOutput tool
+        // that needs an extra turn (tool_use → tool_result → final response)
+        maxTurns: outputSchema ? 2 : 1,
+        tools: [],
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        abortController: controller,
+        ...(outputSchema
+          ? { outputFormat: { type: 'json_schema' as const, schema: outputSchema } }
+          : {}),
+      },
+    });
 
-  return text;
+    let resultText = '';
+    let structuredOutput: unknown = undefined;
+
+    for await (const message of stream) {
+      if (message.type === 'result') {
+        if ('structured_output' in message && message.structured_output !== undefined) {
+          structuredOutput = message.structured_output;
+        }
+        if ('result' in message) {
+          resultText = message.result as string;
+        }
+      }
+    }
+
+    if (structuredOutput !== undefined) {
+      return JSON.stringify(structuredOutput);
+    }
+
+    return resultText;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export function extractJSON(text: string): string {
@@ -89,7 +131,45 @@ export async function callLLMWithRetry<T>(
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
+      // Authentication errors should not be retried
+      if (isAuthError(error)) {
+        if (options.sessionId) {
+          sseManager.emit(options.sessionId, {
+            type: 'status:error',
+            data: {
+              stage: 'auth',
+              error:
+                'Authentication failed. Ensure ANTHROPIC_API_KEY is set or run within Claude Code.',
+            },
+          });
+        }
+        throw new Error(
+          'Authentication failed. Ensure ANTHROPIC_API_KEY is set or run within Claude Code.',
+        );
+      }
+
+      // Rate limit errors get exponential backoff with jitter
+      if (isRateLimitError(error)) {
+        const waitMs = backoffWithJitter(attempt);
+        if (options.sessionId && options.agentName) {
+          sseManager.emit(options.sessionId, {
+            type: 'agent:thought',
+            data: {
+              agent: options.agentName,
+              text: `Rate limited, waiting ${Math.round(waitMs / 1000)}s before retry...`,
+            },
+          });
+        }
+        await sleep(waitMs);
+        // Don't count rate limit retries against the parse-retry budget
+        if (attempt > 0) attempt--;
+        continue;
+      }
+
       if (attempt < maxRetries) {
+        // Backoff before retrying network/parse errors
+        await sleep(backoffWithJitter(attempt, 500));
+
         if (options.sessionId && options.agentName) {
           sseManager.emit(options.sessionId, {
             type: 'agent:thought',

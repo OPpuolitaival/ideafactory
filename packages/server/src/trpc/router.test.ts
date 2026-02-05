@@ -19,7 +19,6 @@ vi.mock('../config/index.js', () => ({
     { name: 'The Visionary', systemPrompt: 'You are The Visionary.', defaultMethod: 'Inversion', builtIn: true },
   ]),
   loadConfig: vi.fn(() => ({
-    apiKey: 'test-key',
     defaults: { workerCount: 3, ideasPerWorker: 15, webSearch: false },
     models: {
       default: 'claude-sonnet-4-20250514',
@@ -30,7 +29,6 @@ vi.mock('../config/index.js', () => ({
     },
     server: { port: 3000 },
   })),
-  saveApiKey: vi.fn(),
 }));
 
 import { appRouter } from './router.js';
@@ -859,28 +857,13 @@ describe('config router', () => {
   });
 
   describe('getConfig', () => {
-    it('returns config with hasApiKey flag, defaults, models, and server', async () => {
+    it('returns config with defaults, models, and server', async () => {
       const result = await caller.config.getConfig();
 
-      expect(result.hasApiKey).toBe(true);
       expect(result.defaults).toEqual({ workerCount: 3, ideasPerWorker: 15, webSearch: false });
       expect(result.models).toBeDefined();
       expect(result.server).toEqual({ port: 3000 });
       expect(loadConfig).toHaveBeenCalled();
-    });
-  });
-
-  describe('setApiKey', () => {
-    it('calls saveApiKey with the provided key', async () => {
-      const { saveApiKey } = await import('../config/index.js');
-      const result = await caller.config.setApiKey({ apiKey: 'sk-ant-test-key' });
-
-      expect(result).toEqual({ success: true });
-      expect(saveApiKey).toHaveBeenCalledWith('sk-ant-test-key');
-    });
-
-    it('rejects an empty API key', async () => {
-      await expect(caller.config.setApiKey({ apiKey: '' })).rejects.toThrow();
     });
   });
 });

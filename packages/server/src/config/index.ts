@@ -7,7 +7,6 @@ import type { Method, Persona } from '@ideafactory/shared';
 import { getConfigPath, getMethodsDir, getPersonasDir } from './paths.js';
 
 const UserConfigSchema = z.object({
-  apiKey: z.string().optional(),
   defaults: z
     .object({
       workerCount: z.number().min(1).max(5).optional(),
@@ -34,7 +33,6 @@ const UserConfigSchema = z.object({
 export type UserConfig = z.infer<typeof UserConfigSchema>;
 
 export interface AppConfig {
-  apiKey: string | undefined;
   defaults: {
     workerCount: number;
     ideasPerWorker: number;
@@ -70,10 +68,7 @@ export function loadConfig(): AppConfig {
     }
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY ?? userConfig.apiKey;
-
   cachedConfig = {
-    apiKey,
     defaults: {
       workerCount: userConfig.defaults?.workerCount ?? DEFAULT_CONFIG.workerCount,
       ideasPerWorker: userConfig.defaults?.ideasPerWorker ?? DEFAULT_CONFIG.ideasPerWorker,
@@ -92,25 +87,6 @@ export function loadConfig(): AppConfig {
   };
 
   return cachedConfig;
-}
-
-export function saveApiKey(apiKey: string): void {
-  const configPath = getConfigPath();
-  const dir = path.dirname(configPath);
-  fs.mkdirSync(dir, { recursive: true });
-
-  let existing: Record<string, unknown> = {};
-  if (fs.existsSync(configPath)) {
-    try {
-      existing = YAML.parse(fs.readFileSync(configPath, 'utf-8')) ?? {};
-    } catch {
-      // ignore parse errors
-    }
-  }
-
-  existing.apiKey = apiKey;
-  fs.writeFileSync(configPath, YAML.stringify(existing), { mode: 0o600 });
-  cachedConfig = null; // invalidate cache
 }
 
 export function loadUserMethods(): Method[] {

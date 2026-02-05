@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { OutputPackageSchema, VisualArtifactSchema } from '@ideafactory/shared';
 import type { Method } from '@ideafactory/shared';
 import { callLLMWithRetry } from './llm.js';
+import { outputPackageJsonSchema, visualArtifactArrayJsonSchema } from './schemas.js';
 import { sseManager } from '../sse/index.js';
 import { getDb, schema } from '../db/index.js';
 
@@ -29,12 +30,11 @@ interface RunOutputOptions {
     eliminated: number | null;
     data: string | null;
   }>;
-  apiKey: string;
   model: string;
 }
 
 export async function runOutput(options: RunOutputOptions): Promise<void> {
-  const { sessionId, domain, coordinate, methods, workerCount, ideas, apiKey, model } = options;
+  const { sessionId, domain, coordinate, methods, workerCount, ideas, model } = options;
   const db = getDb();
 
   sseManager.emit(sessionId, {
@@ -66,7 +66,6 @@ export async function runOutput(options: RunOutputOptions): Promise<void> {
   // Generate output package
   const outputPackage = await callLLMWithRetry(
     {
-      apiKey,
       model,
       system: REPORTING_SKILL,
       prompt: `Package the final output for this ideation session.
@@ -92,8 +91,7 @@ Produce the OutputPackage JSON with:
 4. Session metadata
 
 Return ONLY the JSON object matching the OutputPackage schema.`,
-      temperature: 0.4,
-      maxTokens: 8192,
+      outputSchema: outputPackageJsonSchema,
       sessionId,
       agentName: 'Analyst',
     },
@@ -111,7 +109,6 @@ Return ONLY the JSON object matching the OutputPackage schema.`,
 
   const artifacts = await callLLMWithRetry(
     {
-      apiKey,
       model,
       system: REPORTING_SKILL,
       prompt: `Generate visual artifacts for the output package.
@@ -133,8 +130,7 @@ Generate a JSON array of VisualArtifact objects:
 Each artifact: { type, format, content (raw SVG/HTML string), label }
 
 Return ONLY the JSON array.`,
-      temperature: 0.4,
-      maxTokens: 16384,
+      outputSchema: visualArtifactArrayJsonSchema,
       sessionId,
       agentName: 'Analyst',
     },

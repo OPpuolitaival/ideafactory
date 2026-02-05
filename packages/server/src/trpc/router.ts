@@ -5,7 +5,7 @@ import { router, publicProcedure } from './trpc.js';
 import { schema } from '../db/index.js';
 import { RubricSchema, SessionConfigSchema, STAGE_ORDER } from '@ideafactory/shared';
 import type { Stage } from '@ideafactory/shared';
-import { getAllMethods, getAllPersonas, loadConfig, saveApiKey } from '../config/index.js';
+import { getAllMethods, getAllPersonas, loadConfig } from '../config/index.js';
 import { runPipeline } from '../agents/pipeline.js';
 
 const sessionRouter = router({
@@ -47,7 +47,7 @@ const sessionRouter = router({
       z.object({
         sessionId: z.string(),
         stage: z.string(),
-        data: z.record(z.unknown()).optional(),
+        data: z.record(z.string(), z.unknown()).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -378,19 +378,12 @@ const configRouter = router({
   getConfig: publicProcedure.query(() => {
     const config = loadConfig();
     return {
-      hasApiKey: !!config.apiKey,
       defaults: config.defaults,
       models: config.models,
       server: config.server,
     };
   }),
 
-  setApiKey: publicProcedure
-    .input(z.object({ apiKey: z.string().min(1) }))
-    .mutation(({ input }) => {
-      saveApiKey(input.apiKey);
-      return { success: true };
-    }),
 });
 
 export const appRouter = router({

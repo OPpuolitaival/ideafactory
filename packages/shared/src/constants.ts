@@ -124,11 +124,11 @@ export const DEFAULT_CONFIG = {
   ideasPerWorker: 15,
   webSearch: false,
   models: {
-    default: 'claude-sonnet-4-20250514',
-    navigator: 'claude-haiku-4-20250414',
-    strategist: 'claude-sonnet-4-20250514',
-    worker: 'claude-sonnet-4-20250514',
-    analyst: 'claude-sonnet-4-20250514',
+    default: 'claude-opus-4-6',
+    navigator: 'claude-opus-4-6',
+    strategist: 'claude-opus-4-6',
+    worker: 'claude-opus-4-6',
+    analyst: 'claude-opus-4-6',
   },
   server: {
     port: 3000,

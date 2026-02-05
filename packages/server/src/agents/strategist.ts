@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { MethodRecommendationSchema, RubricSchema } from '@ideafactory/shared';
 import type { Method } from '@ideafactory/shared';
 import { callLLMWithRetry } from './llm.js';
+import { methodRecommendationJsonSchema, rubricJsonSchema } from './schemas.js';
 import { sseManager } from '../sse/index.js';
 import { getDb, schema } from '../db/index.js';
 
@@ -21,12 +22,11 @@ interface RunMethodSelectionOptions {
   sessionId: string;
   coordinate: string;
   methods: Method[];
-  apiKey: string;
   model: string;
 }
 
 export async function runMethodSelection(options: RunMethodSelectionOptions): Promise<void> {
-  const { sessionId, coordinate, methods, apiKey, model } = options;
+  const { sessionId, coordinate, methods, model } = options;
 
   sseManager.emit(sessionId, {
     type: 'agent:thought',
@@ -39,7 +39,6 @@ export async function runMethodSelection(options: RunMethodSelectionOptions): Pr
 
   const recommendation = await callLLMWithRetry(
     {
-      apiKey,
       model,
       system: METHOD_SELECTOR_SKILL,
       prompt: `The user has selected this coordinate in the taxonomy: "${coordinate}"
@@ -48,8 +47,7 @@ Available methods:
 ${methodList}
 
 Recommend 3-5 methods and provide reasoning for each. Return ONLY the JSON object.`,
-      temperature: 0.6,
-      maxTokens: 4096,
+      outputSchema: methodRecommendationJsonSchema,
       sessionId,
       agentName: 'Strategist',
     },
@@ -85,12 +83,11 @@ interface RunRubricDesignOptions {
   coordinate: string;
   domain: string;
   methods: Method[];
-  apiKey: string;
   model: string;
 }
 
 export async function runRubricDesign(options: RunRubricDesignOptions): Promise<void> {
-  const { sessionId, coordinate, domain, methods, apiKey, model } = options;
+  const { sessionId, coordinate, domain, methods, model } = options;
 
   sseManager.emit(sessionId, {
     type: 'agent:thought',
@@ -101,7 +98,6 @@ export async function runRubricDesign(options: RunRubricDesignOptions): Promise<
 
   const rubric = await callLLMWithRetry(
     {
-      apiKey,
       model,
       system: RUBRIC_DESIGNER_SKILL,
       prompt: `Design an evaluation rubric for ideas in this problem space:
@@ -118,8 +114,7 @@ Requirements:
 - 3-5 verification tests
 
 Return ONLY the JSON object.`,
-      temperature: 0.6,
-      maxTokens: 4096,
+      outputSchema: rubricJsonSchema,
       sessionId,
       agentName: 'Strategist',
     },

@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { trpc } from '../trpc/index.js';
 
 interface SettingsDialogProps {
@@ -7,15 +6,6 @@ interface SettingsDialogProps {
 
 export function SettingsDialog({ onClose }: SettingsDialogProps) {
   const configQuery = trpc.config.getConfig.useQuery();
-  const setApiKeyMutation = trpc.config.setApiKey.useMutation();
-  const [apiKey, setApiKey] = useState('');
-
-  const handleSaveApiKey = async () => {
-    if (!apiKey.trim()) return;
-    await setApiKeyMutation.mutateAsync({ apiKey: apiKey.trim() });
-    setApiKey('');
-    configQuery.refetch();
-  };
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
@@ -28,32 +18,10 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
         </div>
 
         <div className="space-y-6">
-          {/* API Key */}
+          {/* Authentication */}
           <div>
-            <label className="block text-sm font-medium mb-2">Anthropic API Key</label>
-            {configQuery.data?.hasApiKey ? (
-              <p className="text-sm text-success mb-2">API key is configured.</p>
-            ) : (
-              <p className="text-sm text-warning mb-2">No API key configured.</p>
-            )}
-            <div className="flex gap-2">
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-ant-..."
-                className="input flex-1"
-              />
-              <button
-                onClick={handleSaveApiKey}
-                disabled={!apiKey.trim() || setApiKeyMutation.isPending}
-                className="btn-primary"
-              >
-                Save
-              </button>
-            </div>
-            <p className="text-xs text-gray-500 mt-2">
-              Or set the ANTHROPIC_API_KEY environment variable.
+            <p className="text-sm text-gray-400">
+              Authentication is handled automatically via Claude Code or the ANTHROPIC_API_KEY environment variable.
             </p>
           </div>
 

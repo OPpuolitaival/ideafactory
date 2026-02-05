@@ -4,20 +4,13 @@ import * as schema from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
-// Mock: @anthropic-ai/sdk
+// Mock: @anthropic-ai/claude-agent-sdk
 // ---------------------------------------------------------------------------
-const mockCreate = vi.fn();
+const mockQuery = vi.fn();
 
-class MockAnthropic {
-  messages = { create: mockCreate };
-  constructor(_opts?: unknown) {}
-}
-
-vi.mock('@anthropic-ai/sdk', () => {
-  return {
-    default: MockAnthropic,
-  };
-});
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  query: (...args: unknown[]) => mockQuery(...args),
+}));
 
 // ---------------------------------------------------------------------------
 // Mock: sseManager – track all emitted events
@@ -49,11 +42,12 @@ vi.mock('../db/index.js', async () => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Build the Anthropic SDK response shape returned by messages.create */
-function anthropicResponse(text: string) {
+/** Build the Agent SDK query result shape */
+function queryResult(text: string, structured?: unknown) {
   return {
-    content: [{ type: 'text', text }],
-    stop_reason: 'end_turn',
+    [Symbol.asyncIterator]: async function* () {
+      yield { type: 'result', result: text, structured_output: structured };
+    },
   };
 }
 
@@ -126,19 +120,17 @@ describe('callLLMWithRetry', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    // Clear the client cache so each test gets a fresh mock
     const llmModule = await import('./llm.js');
     callLLMWithRetry = llmModule.callLLMWithRetry;
   });
 
   it('succeeds on first attempt when parse is valid', async () => {
-    mockCreate.mockResolvedValueOnce(
-      anthropicResponse('{"name":"result","p":"high"}'),
+    mockQuery.mockReturnValueOnce(
+      queryResult('{"name":"result","p":"high"}'),
     );
 
     const result = await callLLMWithRetry(
       {
-        apiKey: 'test-key',
         model: 'claude-sonnet-4-20250514',
         system: 'test system',
         prompt: 'test prompt',
@@ -149,18 +141,17 @@ describe('callLLMWithRetry', () => {
     );
 
     expect(result).toEqual({ name: 'result', p: 'high' });
-    expect(mockCreate).toHaveBeenCalledTimes(1);
+    expect(mockQuery).toHaveBeenCalledTimes(1);
   });
 
   it('retries on parse failure and succeeds on second attempt', async () => {
     // First call returns bad JSON, second returns good JSON
-    mockCreate
-      .mockResolvedValueOnce(anthropicResponse('not json'))
-      .mockResolvedValueOnce(anthropicResponse('{"ok":true}'));
+    mockQuery
+      .mockReturnValueOnce(queryResult('not json'))
+      .mockReturnValueOnce(queryResult('{"ok":true}'));
 
     const result = await callLLMWithRetry(
       {
-        apiKey: 'test-key',
         model: 'claude-sonnet-4-20250514',
         system: 'sys',
         prompt: 'p',
@@ -172,16 +163,15 @@ describe('callLLMWithRetry', () => {
     );
 
     expect(result).toEqual({ ok: true });
-    expect(mockCreate).toHaveBeenCalledTimes(2);
+    expect(mockQuery).toHaveBeenCalledTimes(2);
   });
 
   it('throws after max retries are exceeded', async () => {
-    mockCreate.mockResolvedValue(anthropicResponse('bad json'));
+    mockQuery.mockReturnValue(queryResult('bad json'));
 
     await expect(
       callLLMWithRetry(
         {
-          apiKey: 'test-key',
           model: 'claude-sonnet-4-20250514',
           system: 'sys',
           prompt: 'p',
@@ -193,17 +183,16 @@ describe('callLLMWithRetry', () => {
       ),
     ).rejects.toThrow(/Failed after 2 attempts/);
 
-    expect(mockCreate).toHaveBeenCalledTimes(2);
+    expect(mockQuery).toHaveBeenCalledTimes(2);
   });
 
   it('emits retry SSE events on parse failure', async () => {
-    mockCreate
-      .mockResolvedValueOnce(anthropicResponse('bad'))
-      .mockResolvedValueOnce(anthropicResponse('{"ok":true}'));
+    mockQuery
+      .mockReturnValueOnce(queryResult('bad'))
+      .mockReturnValueOnce(queryResult('{"ok":true}'));
 
     await callLLMWithRetry(
       {
-        apiKey: 'test-key',
         model: 'claude-sonnet-4-20250514',
         system: 'sys',
         prompt: 'p',
@@ -222,6 +211,83 @@ describe('callLLMWithRetry', () => {
         evt.data.text.includes('retrying'),
     );
     expect(retryEvents.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('throws immediately on auth error (401) without retrying', async () => {
+    const authError = new Error('401 Unauthorized');
+    Object.assign(authError, { status: 401 });
+    mockQuery.mockImplementationOnce(() => { throw authError; });
+
+    await expect(
+      callLLMWithRetry(
+        {
+          model: 'claude-sonnet-4-20250514',
+          system: 'sys',
+          prompt: 'p',
+          sessionId: 'sess-auth',
+          agentName: 'AuthTest',
+        },
+        (text) => JSON.parse(text),
+        2,
+      ),
+    ).rejects.toThrow(/Authentication failed/);
+
+    // Should only have been called once (no retries)
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('emits status:error on auth failure', async () => {
+    const authError = new Error('401 Unauthorized');
+    Object.assign(authError, { status: 401 });
+    mockQuery.mockImplementationOnce(() => { throw authError; });
+
+    await callLLMWithRetry(
+      {
+        model: 'claude-sonnet-4-20250514',
+        system: 'sys',
+        prompt: 'p',
+        sessionId: 'sess-auth-sse',
+        agentName: 'AuthSSE',
+      },
+      (text) => JSON.parse(text),
+    ).catch(() => {});
+
+    const errorEvents = mockEmit.mock.calls.filter(
+      ([sid, evt]: [string, { type: string }]) =>
+        sid === 'sess-auth-sse' && evt.type === 'status:error',
+    );
+    expect(errorEvents.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('retries with backoff on rate limit error (429)', async () => {
+    const rateLimitError = new Error('429 Rate limit exceeded');
+    Object.assign(rateLimitError, { status: 429 });
+    mockQuery
+      .mockImplementationOnce(() => { throw rateLimitError; })
+      .mockReturnValueOnce(queryResult('{"ok":true}'));
+
+    const result = await callLLMWithRetry(
+      {
+        model: 'claude-sonnet-4-20250514',
+        system: 'sys',
+        prompt: 'p',
+        sessionId: 'sess-rate',
+        agentName: 'RateAgent',
+      },
+      (text) => JSON.parse(text),
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+
+    // Should emit a rate-limit thought event
+    const rateLimitEvents = mockEmit.mock.calls.filter(
+      ([sid, evt]: [string, { type: string; data: { text: string } }]) =>
+        sid === 'sess-rate' &&
+        evt.type === 'agent:thought' &&
+        evt.data.text.includes('Rate limited'),
+    );
+    expect(rateLimitEvents.length).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -261,15 +327,14 @@ describe('Navigator – runTaxonomy', () => {
 
   it('persists taxonomy to database on valid LLM response', async () => {
     await insertSession(testDb, 'sess-nav');
-    mockCreate.mockResolvedValueOnce(
-      anthropicResponse(JSON.stringify(validTaxonomy)),
+    mockQuery.mockReturnValueOnce(
+      queryResult(JSON.stringify(validTaxonomy)),
     );
 
     await runTaxonomy({
       sessionId: 'sess-nav',
       domain: 'test domain',
       webSearch: false,
-      apiKey: 'test-key',
       model: 'claude-haiku-4-20250414',
     });
 
@@ -287,8 +352,8 @@ describe('Navigator – runTaxonomy', () => {
   it('validates taxonomy against TaxonomyNodeSchema', async () => {
     await insertSession(testDb, 'sess-invalid-tax');
     // Missing required "p" field
-    mockCreate.mockResolvedValue(
-      anthropicResponse(JSON.stringify({ name: 'Root', children: [] })),
+    mockQuery.mockReturnValue(
+      queryResult(JSON.stringify({ name: 'Root', children: [] })),
     );
 
     await expect(
@@ -296,7 +361,6 @@ describe('Navigator – runTaxonomy', () => {
         sessionId: 'sess-invalid-tax',
         domain: 'test domain',
         webSearch: false,
-        apiKey: 'test-key',
         model: 'claude-haiku-4-20250414',
       }),
     ).rejects.toThrow();
@@ -304,15 +368,14 @@ describe('Navigator – runTaxonomy', () => {
 
   it('emits SSE events for taxonomy updates', async () => {
     await insertSession(testDb, 'sess-sse-tax');
-    mockCreate.mockResolvedValueOnce(
-      anthropicResponse(JSON.stringify(validTaxonomy)),
+    mockQuery.mockReturnValueOnce(
+      queryResult(JSON.stringify(validTaxonomy)),
     );
 
     await runTaxonomy({
       sessionId: 'sess-sse-tax',
       domain: 'test domain',
       webSearch: false,
-      apiKey: 'test-key',
       model: 'claude-haiku-4-20250414',
     });
 
@@ -322,25 +385,6 @@ describe('Navigator – runTaxonomy', () => {
 
     expect(events).toContain('agent:thought');
     expect(events).toContain('data:taxonomy_update');
-  });
-
-  it('passes correct temperature (0.7) and maxTokens (16384)', async () => {
-    await insertSession(testDb, 'sess-temp-tax');
-    mockCreate.mockResolvedValueOnce(
-      anthropicResponse(JSON.stringify(validTaxonomy)),
-    );
-
-    await runTaxonomy({
-      sessionId: 'sess-temp-tax',
-      domain: 'test domain',
-      webSearch: false,
-      apiKey: 'test-key',
-      model: 'claude-haiku-4-20250414',
-    });
-
-    const createCall = mockCreate.mock.calls[0][0];
-    expect(createCall.temperature).toBe(0.7);
-    expect(createCall.max_tokens).toBe(16384);
   });
 });
 
@@ -375,15 +419,14 @@ describe('Strategist – runMethodSelection', () => {
 
   it('persists method recommendation to database', async () => {
     await insertSession(testDb, 'sess-meth');
-    mockCreate.mockResolvedValueOnce(
-      anthropicResponse(JSON.stringify(validRecommendation)),
+    mockQuery.mockReturnValueOnce(
+      queryResult(JSON.stringify(validRecommendation)),
     );
 
     await runMethodSelection({
       sessionId: 'sess-meth',
       coordinate: 'test > coordinate',
       methods,
-      apiKey: 'test-key',
       model: 'claude-sonnet-4-20250514',
     });
 
@@ -400,8 +443,8 @@ describe('Strategist – runMethodSelection', () => {
   it('verifies recommendation format matches MethodRecommendationSchema', async () => {
     await insertSession(testDb, 'sess-meth-bad');
     // Missing "recommended" array
-    mockCreate.mockResolvedValue(
-      anthropicResponse(JSON.stringify({ reasoning: {} })),
+    mockQuery.mockReturnValue(
+      queryResult(JSON.stringify({ reasoning: {} })),
     );
 
     await expect(
@@ -409,7 +452,6 @@ describe('Strategist – runMethodSelection', () => {
         sessionId: 'sess-meth-bad',
         coordinate: 'coord',
         methods,
-        apiKey: 'test-key',
         model: 'claude-sonnet-4-20250514',
       }),
     ).rejects.toThrow();
@@ -417,15 +459,14 @@ describe('Strategist – runMethodSelection', () => {
 
   it('emits SSE events for method recommendations', async () => {
     await insertSession(testDb, 'sess-meth-sse');
-    mockCreate.mockResolvedValueOnce(
-      anthropicResponse(JSON.stringify(validRecommendation)),
+    mockQuery.mockReturnValueOnce(
+      queryResult(JSON.stringify(validRecommendation)),
     );
 
     await runMethodSelection({
       sessionId: 'sess-meth-sse',
       coordinate: 'coord',
       methods,
-      apiKey: 'test-key',
       model: 'claude-sonnet-4-20250514',
     });
 
@@ -435,25 +476,6 @@ describe('Strategist – runMethodSelection', () => {
 
     expect(events).toContain('data:methods_recommended');
     expect(events).toContain('agent:thought');
-  });
-
-  it('passes correct temperature (0.6) and maxTokens (4096)', async () => {
-    await insertSession(testDb, 'sess-meth-temp');
-    mockCreate.mockResolvedValueOnce(
-      anthropicResponse(JSON.stringify(validRecommendation)),
-    );
-
-    await runMethodSelection({
-      sessionId: 'sess-meth-temp',
-      coordinate: 'coord',
-      methods,
-      apiKey: 'test-key',
-      model: 'claude-sonnet-4-20250514',
-    });
-
-    const createCall = mockCreate.mock.calls[0][0];
-    expect(createCall.temperature).toBe(0.6);
-    expect(createCall.max_tokens).toBe(4096);
   });
 });
 
@@ -497,8 +519,8 @@ describe('Strategist – runRubricDesign', () => {
 
   it('persists rubric to database', async () => {
     await insertSession(testDb, 'sess-rubric');
-    mockCreate.mockResolvedValueOnce(
-      anthropicResponse(JSON.stringify(validRubric)),
+    mockQuery.mockReturnValueOnce(
+      queryResult(JSON.stringify(validRubric)),
     );
 
     await runRubricDesign({
@@ -506,7 +528,6 @@ describe('Strategist – runRubricDesign', () => {
       coordinate: 'test > coordinate',
       domain: 'test domain',
       methods,
-      apiKey: 'test-key',
       model: 'claude-sonnet-4-20250514',
     });
 
@@ -525,8 +546,8 @@ describe('Strategist – runRubricDesign', () => {
   it('validates rubric structure against RubricSchema', async () => {
     await insertSession(testDb, 'sess-rubric-bad');
     // Missing gates
-    mockCreate.mockResolvedValue(
-      anthropicResponse(JSON.stringify({ criteria: [], tests: [] })),
+    mockQuery.mockReturnValue(
+      queryResult(JSON.stringify({ criteria: [], tests: [] })),
     );
 
     await expect(
@@ -535,7 +556,6 @@ describe('Strategist – runRubricDesign', () => {
         coordinate: 'coord',
         domain: 'domain',
         methods,
-        apiKey: 'test-key',
         model: 'claude-sonnet-4-20250514',
       }),
     ).rejects.toThrow();
@@ -543,8 +563,8 @@ describe('Strategist – runRubricDesign', () => {
 
   it('emits SSE events for rubric generation', async () => {
     await insertSession(testDb, 'sess-rubric-sse');
-    mockCreate.mockResolvedValueOnce(
-      anthropicResponse(JSON.stringify(validRubric)),
+    mockQuery.mockReturnValueOnce(
+      queryResult(JSON.stringify(validRubric)),
     );
 
     await runRubricDesign({
@@ -552,7 +572,6 @@ describe('Strategist – runRubricDesign', () => {
       coordinate: 'coord',
       domain: 'domain',
       methods,
-      apiKey: 'test-key',
       model: 'claude-sonnet-4-20250514',
     });
 
@@ -564,30 +583,10 @@ describe('Strategist – runRubricDesign', () => {
     expect(events).toContain('agent:thought');
   });
 
-  it('passes correct temperature (0.6) and maxTokens (4096)', async () => {
-    await insertSession(testDb, 'sess-rubric-temp');
-    mockCreate.mockResolvedValueOnce(
-      anthropicResponse(JSON.stringify(validRubric)),
-    );
-
-    await runRubricDesign({
-      sessionId: 'sess-rubric-temp',
-      coordinate: 'coord',
-      domain: 'domain',
-      methods,
-      apiKey: 'test-key',
-      model: 'claude-sonnet-4-20250514',
-    });
-
-    const createCall = mockCreate.mock.calls[0][0];
-    expect(createCall.temperature).toBe(0.6);
-    expect(createCall.max_tokens).toBe(4096);
-  });
-
   it('rubric criteria weights are within valid range (1-5)', async () => {
     await insertSession(testDb, 'sess-rubric-weight');
-    mockCreate.mockResolvedValueOnce(
-      anthropicResponse(JSON.stringify(validRubric)),
+    mockQuery.mockReturnValueOnce(
+      queryResult(JSON.stringify(validRubric)),
     );
 
     await runRubricDesign({
@@ -595,7 +594,6 @@ describe('Strategist – runRubricDesign', () => {
       coordinate: 'coord',
       domain: 'domain',
       methods,
-      apiKey: 'test-key',
       model: 'claude-sonnet-4-20250514',
     });
 
@@ -613,176 +611,6 @@ describe('Strategist – runRubricDesign', () => {
 });
 
 // ==========================================================================
-// 6. Temperature verification per agent
-// ==========================================================================
-
-describe('Temperature verification per agent', () => {
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    testDb = createTestDb();
-  });
-
-  it('Navigator uses temperature 0.7', async () => {
-    const { runTaxonomy } = await import('./navigator.js');
-    await insertSession(testDb, 'sess-t-nav');
-
-    const taxonomy = { name: 'Root', p: 'high', children: [] };
-    mockCreate.mockResolvedValueOnce(anthropicResponse(JSON.stringify(taxonomy)));
-
-    await runTaxonomy({
-      sessionId: 'sess-t-nav',
-      domain: 'test',
-      webSearch: false,
-      apiKey: 'key',
-      model: 'model',
-    });
-
-    expect(mockCreate.mock.calls[0][0].temperature).toBe(0.7);
-  });
-
-  it('Strategist method selection uses temperature 0.6', async () => {
-    const { runMethodSelection } = await import('./strategist.js');
-    await insertSession(testDb, 'sess-t-ms');
-
-    const rec = { recommended: [1], reasoning: { '1': 'Good' } };
-    mockCreate.mockResolvedValueOnce(anthropicResponse(JSON.stringify(rec)));
-
-    await runMethodSelection({
-      sessionId: 'sess-t-ms',
-      coordinate: 'coord',
-      methods: [{ id: 1, name: 'M', description: 'd', goodFor: 'g', builtIn: true }],
-      apiKey: 'key',
-      model: 'model',
-    });
-
-    expect(mockCreate.mock.calls[0][0].temperature).toBe(0.6);
-  });
-
-  it('Strategist rubric design uses temperature 0.6', async () => {
-    const { runRubricDesign } = await import('./strategist.js');
-    await insertSession(testDb, 'sess-t-rd');
-
-    const rubric = {
-      gates: [{ id: 'g1', text: 'Gate' }],
-      criteria: [{ id: 'c1', text: 'C', weight: 3, description: 'd' }],
-      tests: [{ id: 't1', text: 'T' }],
-    };
-    mockCreate.mockResolvedValueOnce(anthropicResponse(JSON.stringify(rubric)));
-
-    await runRubricDesign({
-      sessionId: 'sess-t-rd',
-      coordinate: 'coord',
-      domain: 'domain',
-      methods: [{ id: 1, name: 'M', description: 'd', goodFor: 'g', builtIn: true }],
-      apiKey: 'key',
-      model: 'model',
-    });
-
-    expect(mockCreate.mock.calls[0][0].temperature).toBe(0.6);
-  });
-
-  it('callLLM default temperature is 0.7 when not specified', async () => {
-    const { callLLM } = await import('./llm.js');
-
-    mockCreate.mockResolvedValueOnce(anthropicResponse('hello'));
-
-    await callLLM({
-      apiKey: 'key',
-      model: 'model',
-      system: 'sys',
-      prompt: 'prompt',
-    });
-
-    expect(mockCreate.mock.calls[0][0].temperature).toBe(0.7);
-  });
-});
-
-// ==========================================================================
-// 7. maxTokens verification per agent
-// ==========================================================================
-
-describe('maxTokens verification per agent', () => {
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    testDb = createTestDb();
-  });
-
-  it('Navigator taxonomy uses maxTokens 16384', async () => {
-    const { runTaxonomy } = await import('./navigator.js');
-    await insertSession(testDb, 'sess-mt-nav');
-
-    const taxonomy = { name: 'Root', p: 'high', children: [] };
-    mockCreate.mockResolvedValueOnce(anthropicResponse(JSON.stringify(taxonomy)));
-
-    await runTaxonomy({
-      sessionId: 'sess-mt-nav',
-      domain: 'test',
-      webSearch: false,
-      apiKey: 'key',
-      model: 'model',
-    });
-
-    expect(mockCreate.mock.calls[0][0].max_tokens).toBe(16384);
-  });
-
-  it('Strategist method selection uses maxTokens 4096', async () => {
-    const { runMethodSelection } = await import('./strategist.js');
-    await insertSession(testDb, 'sess-mt-ms');
-
-    const rec = { recommended: [1], reasoning: { '1': 'Good' } };
-    mockCreate.mockResolvedValueOnce(anthropicResponse(JSON.stringify(rec)));
-
-    await runMethodSelection({
-      sessionId: 'sess-mt-ms',
-      coordinate: 'coord',
-      methods: [{ id: 1, name: 'M', description: 'd', goodFor: 'g', builtIn: true }],
-      apiKey: 'key',
-      model: 'model',
-    });
-
-    expect(mockCreate.mock.calls[0][0].max_tokens).toBe(4096);
-  });
-
-  it('Strategist rubric design uses maxTokens 4096', async () => {
-    const { runRubricDesign } = await import('./strategist.js');
-    await insertSession(testDb, 'sess-mt-rd');
-
-    const rubric = {
-      gates: [{ id: 'g1', text: 'Gate' }],
-      criteria: [{ id: 'c1', text: 'C', weight: 3, description: 'd' }],
-      tests: [{ id: 't1', text: 'T' }],
-    };
-    mockCreate.mockResolvedValueOnce(anthropicResponse(JSON.stringify(rubric)));
-
-    await runRubricDesign({
-      sessionId: 'sess-mt-rd',
-      coordinate: 'coord',
-      domain: 'domain',
-      methods: [{ id: 1, name: 'M', description: 'd', goodFor: 'g', builtIn: true }],
-      apiKey: 'key',
-      model: 'model',
-    });
-
-    expect(mockCreate.mock.calls[0][0].max_tokens).toBe(4096);
-  });
-
-  it('callLLM default maxTokens is 8192 when not specified', async () => {
-    const { callLLM } = await import('./llm.js');
-
-    mockCreate.mockResolvedValueOnce(anthropicResponse('hello'));
-
-    await callLLM({
-      apiKey: 'key',
-      model: 'model',
-      system: 'sys',
-      prompt: 'prompt',
-    });
-
-    expect(mockCreate.mock.calls[0][0].max_tokens).toBe(8192);
-  });
-});
-
-// ==========================================================================
 // 8. callLLM – basic behavior
 // ==========================================================================
 
@@ -796,10 +624,9 @@ describe('callLLM', () => {
   });
 
   it('returns text content from LLM response', async () => {
-    mockCreate.mockResolvedValueOnce(anthropicResponse('hello world'));
+    mockQuery.mockReturnValueOnce(queryResult('hello world'));
 
     const result = await callLLM({
-      apiKey: 'test-key',
       model: 'claude-sonnet-4-20250514',
       system: 'system',
       prompt: 'say hello',
@@ -809,10 +636,9 @@ describe('callLLM', () => {
   });
 
   it('emits agent:thought SSE when sessionId and agentName provided', async () => {
-    mockCreate.mockResolvedValueOnce(anthropicResponse('response'));
+    mockQuery.mockReturnValueOnce(queryResult('response'));
 
     await callLLM({
-      apiKey: 'test-key',
       model: 'model',
       system: 'sys',
       prompt: 'p',
@@ -828,10 +654,9 @@ describe('callLLM', () => {
   });
 
   it('does NOT emit SSE when sessionId or agentName is missing', async () => {
-    mockCreate.mockResolvedValueOnce(anthropicResponse('response'));
+    mockQuery.mockReturnValueOnce(queryResult('response'));
 
     await callLLM({
-      apiKey: 'test-key',
       model: 'model',
       system: 'sys',
       prompt: 'p',
@@ -845,43 +670,63 @@ describe('callLLM', () => {
     expect(startingEvents).toHaveLength(0);
   });
 
-  it('concatenates multiple text blocks', async () => {
-    mockCreate.mockResolvedValueOnce({
-      content: [
-        { type: 'text', text: 'part1' },
-        { type: 'text', text: 'part2' },
-      ],
-      stop_reason: 'end_turn',
+  it('passes model and systemPrompt to Agent SDK', async () => {
+    mockQuery.mockReturnValueOnce(queryResult('ok'));
+    await callLLM({
+      model: 'my-model',
+      system: 'my-system',
+      prompt: 'my-prompt',
     });
+    const args = mockQuery.mock.calls[0][0];
+    expect(args.prompt).toBe('my-prompt');
+    expect(args.options.model).toBe('my-model');
+    expect(args.options.systemPrompt).toBe('my-system');
+  });
 
-    const result = await callLLM({
-      apiKey: 'key',
+  it('passes abortController to Agent SDK for timeout', async () => {
+    mockQuery.mockReturnValueOnce(queryResult('ok'));
+    await callLLM({
+      model: 'model',
+      system: 'sys',
+      prompt: 'p',
+      timeoutMs: 30000,
+    });
+    const args = mockQuery.mock.calls[0][0];
+    expect(args.options.abortController).toBeDefined();
+    expect(args.options.abortController).toBeInstanceOf(AbortController);
+  });
+
+  it('uses 120s default timeout', async () => {
+    mockQuery.mockReturnValueOnce(queryResult('ok'));
+    await callLLM({
       model: 'model',
       system: 'sys',
       prompt: 'p',
     });
-
-    expect(result).toBe('part1\npart2');
+    const args = mockQuery.mock.calls[0][0];
+    expect(args.options.abortController).toBeDefined();
+    // Signal should not be aborted yet (120s hasn't passed)
+    expect(args.options.abortController.signal.aborted).toBe(false);
   });
 
-  it('passes model, system, temperature, max_tokens to Anthropic SDK', async () => {
-    mockCreate.mockResolvedValueOnce(anthropicResponse('ok'));
-
-    await callLLM({
-      apiKey: 'test-key',
-      model: 'my-model',
-      system: 'my-system',
-      prompt: 'my-prompt',
-      temperature: 0.42,
-      maxTokens: 1234,
-    });
-
-    const args = mockCreate.mock.calls[0][0];
-    expect(args.model).toBe('my-model');
-    expect(args.system).toBe('my-system');
-    expect(args.temperature).toBe(0.42);
-    expect(args.max_tokens).toBe(1234);
-    expect(args.messages).toEqual([{ role: 'user', content: 'my-prompt' }]);
+  it('rejects when the request times out', async () => {
+    mockQuery.mockImplementationOnce(({ options }: { options: { abortController: AbortController } }) => ({
+      [Symbol.asyncIterator]: async function* () {
+        await new Promise((_resolve, reject) => {
+          options.abortController.signal.addEventListener('abort', () => {
+            reject(new Error('Request was aborted.'));
+          });
+        });
+      },
+    }));
+    await expect(
+      callLLM({
+        model: 'model',
+        system: 'sys',
+        prompt: 'p',
+        timeoutMs: 50,
+      }),
+    ).rejects.toThrow(/aborted/i);
   });
 });
 
@@ -902,15 +747,14 @@ describe('Navigator – edge cases', () => {
   it('handles taxonomy returned inside code block', async () => {
     await insertSession(testDb, 'sess-cb');
     const taxonomy = { name: 'Root', p: 'high', children: [] };
-    mockCreate.mockResolvedValueOnce(
-      anthropicResponse('```json\n' + JSON.stringify(taxonomy) + '\n```'),
+    mockQuery.mockReturnValueOnce(
+      queryResult('```json\n' + JSON.stringify(taxonomy) + '\n```'),
     );
 
     await runTaxonomy({
       sessionId: 'sess-cb',
       domain: 'test',
       webSearch: false,
-      apiKey: 'key',
       model: 'model',
     });
 
@@ -925,13 +769,12 @@ describe('Navigator – edge cases', () => {
   it('emits thought events with correct agent name "Navigator"', async () => {
     await insertSession(testDb, 'sess-agent-name');
     const taxonomy = { name: 'Root', p: 'high', children: [] };
-    mockCreate.mockResolvedValueOnce(anthropicResponse(JSON.stringify(taxonomy)));
+    mockQuery.mockReturnValueOnce(queryResult(JSON.stringify(taxonomy)));
 
     await runTaxonomy({
       sessionId: 'sess-agent-name',
       domain: 'test',
       webSearch: false,
-      apiKey: 'key',
       model: 'model',
     });
 
@@ -962,7 +805,7 @@ describe('Strategist – runMethodSelection edge cases', () => {
   it('defaults selected to recommended in DB', async () => {
     await insertSession(testDb, 'sess-default-sel');
     const rec = { recommended: [2, 4], reasoning: { '2': 'Good', '4': 'Great' } };
-    mockCreate.mockResolvedValueOnce(anthropicResponse(JSON.stringify(rec)));
+    mockQuery.mockReturnValueOnce(queryResult(JSON.stringify(rec)));
 
     await runMethodSelection({
       sessionId: 'sess-default-sel',
@@ -971,7 +814,6 @@ describe('Strategist – runMethodSelection edge cases', () => {
         { id: 2, name: 'M2', description: 'd', goodFor: 'g', builtIn: true },
         { id: 4, name: 'M4', description: 'd', goodFor: 'g', builtIn: true },
       ],
-      apiKey: 'key',
       model: 'model',
     });
 
@@ -987,13 +829,12 @@ describe('Strategist – runMethodSelection edge cases', () => {
   it('emits thought events with correct agent name "Strategist"', async () => {
     await insertSession(testDb, 'sess-strat-name');
     const rec = { recommended: [1], reasoning: { '1': 'ok' } };
-    mockCreate.mockResolvedValueOnce(anthropicResponse(JSON.stringify(rec)));
+    mockQuery.mockReturnValueOnce(queryResult(JSON.stringify(rec)));
 
     await runMethodSelection({
       sessionId: 'sess-strat-name',
       coordinate: 'coord',
       methods: [{ id: 1, name: 'M', description: 'd', goodFor: 'g', builtIn: true }],
-      apiKey: 'key',
       model: 'model',
     });
 

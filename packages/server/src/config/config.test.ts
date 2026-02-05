@@ -67,9 +67,6 @@ describe('config module', () => {
     methodsDir = path.join(tmpDir, 'methods');
     personasDir = path.join(tmpDir, 'personas');
 
-    // Remove env var so it doesn't leak between tests
-    delete process.env.ANTHROPIC_API_KEY;
-
     // Mock path helpers so every function in index.ts uses our tmp dir
     vi.doMock('./paths.js', () => ({
       getDataDir: () => tmpDir,
@@ -99,19 +96,17 @@ describe('config module', () => {
     it('returns default config when no config file exists', () => {
       const cfg = configModule.loadConfig();
 
-      expect(cfg.apiKey).toBeUndefined();
       expect(cfg.defaults.workerCount).toBe(3);
       expect(cfg.defaults.ideasPerWorker).toBe(15);
       expect(cfg.defaults.webSearch).toBe(false);
       expect(cfg.server.port).toBe(3000);
       // Model defaults
-      expect(cfg.models.default).toBe('claude-sonnet-4-20250514');
-      expect(cfg.models.navigator).toBe('claude-haiku-4-20250414');
+      expect(cfg.models.default).toBe('claude-opus-4-6');
+      expect(cfg.models.navigator).toBe('claude-opus-4-6');
     });
 
     it('reads valid config.yaml correctly', () => {
       const yamlContent = YAML.stringify({
-        apiKey: 'sk-yaml-key',
         defaults: {
           workerCount: 5,
           ideasPerWorker: 25,
@@ -124,7 +119,6 @@ describe('config module', () => {
 
       const cfg = configModule.loadConfig();
 
-      expect(cfg.apiKey).toBe('sk-yaml-key');
       expect(cfg.defaults.workerCount).toBe(5);
       expect(cfg.defaults.ideasPerWorker).toBe(25);
       expect(cfg.defaults.webSearch).toBe(true);
@@ -199,40 +193,6 @@ describe('config module', () => {
 
     it('port defaults to 3000', () => {
       expect(configModule.loadConfig().server.port).toBe(3000);
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // API key resolution
-  // -----------------------------------------------------------------------
-
-  describe('API key resolution', () => {
-    it('ANTHROPIC_API_KEY env var takes priority over config file', () => {
-      // Write a config file with an apiKey
-      fs.mkdirSync(path.dirname(configPath), { recursive: true });
-      fs.writeFileSync(configPath, YAML.stringify({ apiKey: 'sk-from-config' }));
-
-      process.env.ANTHROPIC_API_KEY = 'sk-from-env';
-
-      const cfg = configModule.loadConfig();
-      expect(cfg.apiKey).toBe('sk-from-env');
-    });
-
-    it('config.yaml apiKey is used as fallback when env var is not set', () => {
-      delete process.env.ANTHROPIC_API_KEY;
-
-      fs.mkdirSync(path.dirname(configPath), { recursive: true });
-      fs.writeFileSync(configPath, YAML.stringify({ apiKey: 'sk-from-config' }));
-
-      const cfg = configModule.loadConfig();
-      expect(cfg.apiKey).toBe('sk-from-config');
-    });
-
-    it('apiKey is undefined when neither env var nor config provides it', () => {
-      delete process.env.ANTHROPIC_API_KEY;
-
-      const cfg = configModule.loadConfig();
-      expect(cfg.apiKey).toBeUndefined();
     });
   });
 
@@ -532,101 +492,4 @@ describe('config module', () => {
     });
   });
 
-  // -----------------------------------------------------------------------
-  // saveApiKey
-  // -----------------------------------------------------------------------
-
-  describe('saveApiKey', () => {
-    it('writes api key to config.yaml', () => {
-      configModule.saveApiKey('sk-new-key');
-
-      const raw = fs.readFileSync(configPath, 'utf-8');
-      const parsed = YAML.parse(raw);
-      expect(parsed.apiKey).toBe('sk-new-key');
-    });
-
-    it('creates parent directory if it does not exist', () => {
-      // tmpDir already exists but let's use a nested path to confirm mkdirSync works
-      expect(fs.existsSync(configPath)).toBe(false);
-
-      configModule.saveApiKey('sk-test');
-      expect(fs.existsSync(configPath)).toBe(true);
-    });
-
-    it('sets file permissions to 0o600', () => {
-      configModule.saveApiKey('sk-secret');
-
-      const stat = fs.statSync(configPath);
-      // mode includes file-type bits; mask to get permission bits only
-      const permissions = stat.mode & 0o777;
-      expect(permissions).toBe(0o600);
-    });
-
-    it('preserves existing config values when saving api key', () => {
-      // Write an existing config first
-      fs.mkdirSync(path.dirname(configPath), { recursive: true });
-      fs.writeFileSync(
-        configPath,
-        YAML.stringify({
-          defaults: { workerCount: 4 },
-          server: { port: 9999 },
-        }),
-      );
-
-      configModule.saveApiKey('sk-updated');
-
-      const raw = fs.readFileSync(configPath, 'utf-8');
-      const parsed = YAML.parse(raw);
-      expect(parsed.apiKey).toBe('sk-updated');
-      expect(parsed.defaults.workerCount).toBe(4);
-      expect(parsed.server.port).toBe(9999);
-    });
-
-    it('overwrites existing apiKey', () => {
-      fs.mkdirSync(path.dirname(configPath), { recursive: true });
-      fs.writeFileSync(configPath, YAML.stringify({ apiKey: 'sk-old' }));
-
-      configModule.saveApiKey('sk-new');
-
-      const parsed = YAML.parse(fs.readFileSync(configPath, 'utf-8'));
-      expect(parsed.apiKey).toBe('sk-new');
-    });
-
-    it('invalidates config cache after saving', () => {
-      // Load config to populate cache
-      const cfg1 = configModule.loadConfig();
-      expect(cfg1.apiKey).toBeUndefined();
-
-      // Save a key
-      configModule.saveApiKey('sk-after-save');
-
-      // Next load should re-read (cache invalidated)
-      const cfg2 = configModule.loadConfig();
-      // Without env var, it should pick up the saved key
-      expect(cfg2.apiKey).toBe('sk-after-save');
-    });
-
-    it('handles pre-existing malformed YAML that parses to null', () => {
-      fs.mkdirSync(path.dirname(configPath), { recursive: true });
-      // YAML.parse('') returns null, and the `?? {}` fallback kicks in
-      fs.writeFileSync(configPath, '');
-
-      configModule.saveApiKey('sk-recover');
-
-      const parsed = YAML.parse(fs.readFileSync(configPath, 'utf-8'));
-      expect(parsed.apiKey).toBe('sk-recover');
-    });
-
-    it('handles pre-existing file with truly unparseable YAML', () => {
-      fs.mkdirSync(path.dirname(configPath), { recursive: true });
-      // This content causes YAML.parse to throw, which is caught by the try/catch,
-      // resulting in existing = {}
-      fs.writeFileSync(configPath, '  - :\n    -\n  a: [');
-
-      configModule.saveApiKey('sk-after-error');
-
-      const parsed = YAML.parse(fs.readFileSync(configPath, 'utf-8'));
-      expect(parsed.apiKey).toBe('sk-after-error');
-    });
-  });
 });

@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 import { getDb, schema } from '../db/index.js';
-import { loadConfig, getAllMethods, getAllPersonas, saveApiKey } from '../config/index.js';
+import { loadConfig, getAllMethods, getAllPersonas } from '../config/index.js';
 import { runPipeline } from '../agents/pipeline.js';
 import { sseManager } from '../sse/index.js';
 import { nanoid } from 'nanoid';
@@ -69,10 +69,6 @@ async function cmdRun(args: string[]): Promise<void> {
   });
 
   const config = loadConfig();
-  if (!config.apiKey) {
-    console.error('No API key configured. Set ANTHROPIC_API_KEY or run: ideafactory config set apiKey <key>');
-    process.exit(1);
-  }
 
   const domain = values.domain as string;
   if (!domain) {
@@ -302,12 +298,6 @@ async function cmdStage(args: string[]): Promise<void> {
   const stageName = args[0];
   const outputFormat = args.includes('--output') ? args[args.indexOf('--output') + 1] : 'json';
 
-  const config = loadConfig();
-  if (!config.apiKey) {
-    console.error('No API key configured.');
-    process.exit(1);
-  }
-
   const db = getDb();
 
   switch (stageName) {
@@ -410,7 +400,6 @@ async function cmdConfig(args: string[]): Promise<void> {
     case 'show': {
       const config = loadConfig();
       console.log(JSON.stringify({
-        hasApiKey: !!config.apiKey,
         defaults: config.defaults,
         models: config.models,
         server: config.server,
@@ -425,12 +414,7 @@ async function cmdConfig(args: string[]): Promise<void> {
         console.error('Usage: config set <key> <value>');
         process.exit(1);
       }
-      if (key === 'apiKey') {
-        saveApiKey(value);
-        console.log('API key saved.');
-      } else {
-        console.error(`Direct config key "${key}" editing not yet implemented. Edit ~/.ideafactory/config.yaml directly.`);
-      }
+      console.error(`Direct config key "${key}" editing not yet implemented. Edit ~/.ideafactory/config.yaml directly.`);
       break;
     }
 

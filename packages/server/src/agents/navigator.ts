@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { TaxonomyNodeSchema } from '@ideafactory/shared';
 import { callLLMWithRetry } from './llm.js';
+import { taxonomyJsonSchema } from './schemas.js';
 import { sseManager } from '../sse/index.js';
 import { getDb, schema } from '../db/index.js';
 
@@ -16,12 +17,11 @@ interface RunTaxonomyOptions {
   sessionId: string;
   domain: string;
   webSearch: boolean;
-  apiKey: string;
   model: string;
 }
 
 export async function runTaxonomy(options: RunTaxonomyOptions): Promise<void> {
-  const { sessionId, domain, apiKey, model } = options;
+  const { sessionId, domain, model } = options;
 
   sseManager.emit(sessionId, {
     type: 'agent:thought',
@@ -30,7 +30,6 @@ export async function runTaxonomy(options: RunTaxonomyOptions): Promise<void> {
 
   const taxonomy = await callLLMWithRetry(
     {
-      apiKey,
       model,
       system: SKILL_MD,
       prompt: `Generate a comprehensive MECE taxonomy tree for the domain: "${domain}"
@@ -43,8 +42,7 @@ Remember:
 - Full-distribution sampling: include obvious, mainstream, AND niche/speculative categories
 
 Return ONLY the JSON object. No additional text.`,
-      temperature: 0.7,
-      maxTokens: 16384,
+      outputSchema: taxonomyJsonSchema,
       sessionId,
       agentName: 'Navigator',
     },

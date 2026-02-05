@@ -71,22 +71,27 @@ export function createTestDb() {
 }
 
 /**
- * Mock the Anthropic SDK to avoid real API calls during tests.
- * Returns a mock that can be configured per test.
+ * Mock the Claude Agent SDK to avoid real API calls during tests.
+ * Returns a mock query function that can be configured per test.
  */
-export function mockAnthropicSdk() {
-  const mockCreate = vi.fn().mockResolvedValue({
-    content: [{ type: 'text', text: '{}' }],
-    stop_reason: 'end_turn',
-  });
+export function mockAgentSdk() {
+  const mockQuery = vi.fn();
+  return { mockQuery };
+}
 
-  const mockClient = {
-    messages: {
-      create: mockCreate,
+/**
+ * Creates a mock async iterable result for the Agent SDK query function.
+ */
+export function queryResult(text: string, structured?: unknown) {
+  return {
+    [Symbol.asyncIterator]: async function* () {
+      yield {
+        type: 'result',
+        result: text,
+        structured_output: structured,
+      };
     },
   };
-
-  return { mockClient, mockCreate };
 }
 
 export type TestDb = ReturnType<typeof createTestDb>;
