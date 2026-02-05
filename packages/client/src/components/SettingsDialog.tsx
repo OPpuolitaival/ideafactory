@@ -1,0 +1,79 @@
+import { useState } from 'react';
+import { trpc } from '../trpc/index.js';
+
+interface SettingsDialogProps {
+  onClose: () => void;
+}
+
+export function SettingsDialog({ onClose }: SettingsDialogProps) {
+  const configQuery = trpc.config.getConfig.useQuery();
+  const setApiKeyMutation = trpc.config.setApiKey.useMutation();
+  const [apiKey, setApiKey] = useState('');
+
+  const handleSaveApiKey = async () => {
+    if (!apiKey.trim()) return;
+    await setApiKeyMutation.mutateAsync({ apiKey: apiKey.trim() });
+    setApiKey('');
+    configQuery.refetch();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-bg-2 border border-bg-3 rounded-xl w-full max-w-lg p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-semibold">Settings</h2>
+          <button onClick={onClose} className="btn-ghost text-sm">
+            ✕
+          </button>
+        </div>
+
+        <div className="space-y-6">
+          {/* API Key */}
+          <div>
+            <label className="block text-sm font-medium mb-2">Anthropic API Key</label>
+            {configQuery.data?.hasApiKey ? (
+              <p className="text-sm text-success mb-2">API key is configured.</p>
+            ) : (
+              <p className="text-sm text-warning mb-2">No API key configured.</p>
+            )}
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="sk-ant-..."
+                className="input flex-1"
+              />
+              <button
+                onClick={handleSaveApiKey}
+                disabled={!apiKey.trim() || setApiKeyMutation.isPending}
+                className="btn-primary"
+              >
+                Save
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Or set the ANTHROPIC_API_KEY environment variable.
+            </p>
+          </div>
+
+          {/* Current Config */}
+          {configQuery.data && (
+            <div>
+              <label className="block text-sm font-medium mb-2">Current Defaults</label>
+              <div className="bg-bg-1 rounded-lg p-3 text-sm font-mono text-gray-400 space-y-1">
+                <p>Workers: {configQuery.data.defaults.workerCount}</p>
+                <p>Ideas/worker: {configQuery.data.defaults.ideasPerWorker}</p>
+                <p>Web search: {configQuery.data.defaults.webSearch ? 'on' : 'off'}</p>
+                <p>Default model: {configQuery.data.models.default}</p>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                Edit ~/.ideafactory/config.yaml to change defaults.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
