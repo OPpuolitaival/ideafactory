@@ -7,6 +7,7 @@ import { appRouter } from './trpc/router.js';
 import { createContext } from './trpc/context.js';
 import { sseManager } from './sse/index.js';
 import { loadConfig } from './config/index.js';
+import { getDb } from './db/index.js';
 import type { SSEEvent } from '@ideafactory/shared';
 
 const app = new Hono();
@@ -64,6 +65,7 @@ app.get('/api/session/:id/stream', (c) => {
 app.get('/api/health', (c) => c.json({ status: 'ok' }));
 
 const config = loadConfig();
+sseManager.setDb(getDb());
 const port = config.server.port;
 
 console.log(`Idea Factory server starting on http://localhost:${port}`);

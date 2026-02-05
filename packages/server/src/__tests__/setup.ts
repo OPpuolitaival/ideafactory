@@ -65,6 +65,16 @@ export function createTestDb() {
 
     CREATE INDEX IF NOT EXISTS idx_ideas_session ON ideas(session_id);
     CREATE INDEX IF NOT EXISTS idx_ideas_phase ON ideas(session_id, phase);
+
+    CREATE TABLE IF NOT EXISTS event_log (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id    TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      type          TEXT NOT NULL,
+      data          TEXT NOT NULL,
+      created_at    INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_event_log_session ON event_log(session_id);
   `);
 
   return drizzle(sqlite, { schema });

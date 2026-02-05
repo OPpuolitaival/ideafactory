@@ -58,3 +58,13 @@ export const outputPackages = sqliteTable('output_packages', {
   package: text('package').notNull(), // JSON: OutputPackage
   artifacts: text('artifacts'), // JSON: VisualArtifact[]
 });
+
+export const eventLog = sqliteTable('event_log', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  sessionId: text('session_id')
+    .notNull()
+    .references(() => sessions.id, { onDelete: 'cascade' }),
+  type: text('type').notNull(),
+  data: text('data').notNull(), // JSON
+  createdAt: integer('created_at').notNull(),
+});

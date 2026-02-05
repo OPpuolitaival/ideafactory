@@ -52,6 +52,63 @@ export function Dashboard({ onStartSession }: DashboardProps) {
       if (full.output?.package) {
         store.setOutputPackage(full.output.package);
       }
+
+      // Hydrate factory ideas by phase
+      if (full.ideas && full.ideas.length > 0) {
+        const divergeIdeas = full.ideas.filter((i) => i.phase === 'diverge');
+        const convergeIdeas = full.ideas.filter((i) => i.phase === 'converge');
+        const evolveIdeas = full.ideas.filter((i) => i.phase === 'evolve');
+        const qaIdeas = full.ideas.filter((i) => i.phase === 'qa');
+
+        // Diverge: group by workerId and add each idea
+        for (const idea of divergeIdeas) {
+          if (idea.workerId && idea.data) {
+            store.addWorkerIdea(idea.workerId, idea.data);
+          }
+        }
+
+        // Converge
+        if (convergeIdeas.length > 0) {
+          store.setScoredIdeas(convergeIdeas.filter((i) => i.data).map((i) => i.data));
+        }
+
+        // Evolve
+        if (evolveIdeas.length > 0) {
+          store.setEvolvedIdeas(evolveIdeas.filter((i) => i.data).map((i) => i.data));
+        }
+
+        // QA
+        if (qaIdeas.length > 0) {
+          store.setQAResults(qaIdeas.filter((i) => i.data).map((i) => i.data));
+        }
+
+        // Determine factory phase from what data exists
+        if (qaIdeas.length > 0) {
+          store.setFactoryPhase('qa');
+        } else if (evolveIdeas.length > 0) {
+          store.setFactoryPhase('evolve');
+        } else if (convergeIdeas.length > 0) {
+          store.setFactoryPhase('converge');
+        } else if (divergeIdeas.length > 0) {
+          store.setFactoryPhase('diverge');
+        }
+
+        // If stage is past factory, mark factory complete
+        if (session.status === 'output' || session.status === 'completed') {
+          store.setFactoryPhase('complete');
+        }
+      }
+
+      // Hydrate thoughts from event log
+      if (full.eventLog) {
+        for (const entry of full.eventLog) {
+          if (entry.type === 'agent:thought') {
+            store.addThought(entry.data.agent, entry.data.text);
+          } else if (entry.type === 'agent:tool_use') {
+            store.addThought(entry.data.agent, `Using tool: ${entry.data.tool}`);
+          }
+        }
+      }
     } catch {
       // Session data fetch failed, continue with empty store
     }

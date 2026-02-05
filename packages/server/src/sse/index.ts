@@ -1,9 +1,23 @@
 import type { SSEEvent } from '@ideafactory/shared';
+import type { AppDb } from '../db/index.js';
+import { schema } from '../db/index.js';
 
 type SSEListener = (event: SSEEvent) => void;
 
+const PERSISTABLE_TYPES = new Set([
+  'agent:thought',
+  'agent:tool_use',
+  'status:stage_complete',
+  'status:error',
+]);
+
 class SSEManager {
   private listeners = new Map<string, Set<SSEListener>>();
+  private db: AppDb | null = null;
+
+  setDb(db: AppDb): void {
+    this.db = db;
+  }
 
   subscribe(sessionId: string, listener: SSEListener): () => void {
     if (!this.listeners.has(sessionId)) {
@@ -23,6 +37,20 @@ class SSEManager {
   }
 
   emit(sessionId: string, event: SSEEvent): void {
+    // Persist to DB for resumable events
+    if (this.db && PERSISTABLE_TYPES.has(event.type)) {
+      try {
+        this.db.insert(schema.eventLog).values({
+          sessionId,
+          type: event.type,
+          data: JSON.stringify(event.data),
+          createdAt: Date.now(),
+        }).run();
+      } catch (e) {
+        console.error('Failed to persist SSE event:', e);
+      }
+    }
+
     const set = this.listeners.get(sessionId);
     if (set) {
       for (const listener of set) {

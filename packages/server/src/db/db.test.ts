@@ -8,6 +8,7 @@ import {
   rubrics,
   ideas,
   outputPackages,
+  eventLog,
 } from './schema.js';
 
 let db: TestDb;
@@ -158,6 +159,15 @@ describe('Cascade delete', () => {
         artifacts: JSON.stringify([]),
       })
       .run();
+
+    db.insert(eventLog)
+      .values({
+        sessionId: 'sess-1',
+        type: 'agent:thought',
+        data: JSON.stringify({ agent: 'navigator', text: 'Starting work...' }),
+        createdAt: Date.now(),
+      })
+      .run();
   });
 
   it('should cascade-delete taxonomy_trees when session is deleted', () => {
@@ -190,6 +200,12 @@ describe('Cascade delete', () => {
     expect(rows).toHaveLength(0);
   });
 
+  it('should cascade-delete event_log when session is deleted', () => {
+    db.delete(sessions).where(eq(sessions.id, 'sess-1')).run();
+    const rows = db.select().from(eventLog).all();
+    expect(rows).toHaveLength(0);
+  });
+
   it('should cascade-delete all child tables at once', () => {
     db.delete(sessions).where(eq(sessions.id, 'sess-1')).run();
 
@@ -198,6 +214,7 @@ describe('Cascade delete', () => {
     expect(db.select().from(rubrics).all()).toHaveLength(0);
     expect(db.select().from(ideas).all()).toHaveLength(0);
     expect(db.select().from(outputPackages).all()).toHaveLength(0);
+    expect(db.select().from(eventLog).all()).toHaveLength(0);
   });
 });
 
@@ -820,6 +837,7 @@ describe('Index existence', () => {
     const indexNames = result.map((r) => r.name);
     expect(indexNames).toContain('idx_ideas_session');
     expect(indexNames).toContain('idx_ideas_phase');
-    expect(indexNames).toHaveLength(2);
+    expect(indexNames).toContain('idx_event_log_session');
+    expect(indexNames).toHaveLength(3);
   });
 });

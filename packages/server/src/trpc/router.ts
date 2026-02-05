@@ -149,6 +149,12 @@ const sessionRouter = router({
       .from(schema.outputPackages)
       .where(eq(schema.outputPackages.sessionId, input.id));
 
+    const eventLogRows = await ctx.db
+      .select()
+      .from(schema.eventLog)
+      .where(eq(schema.eventLog.sessionId, input.id))
+      .orderBy(schema.eventLog.id);
+
     return {
       ...session,
       config: session.config ? JSON.parse(session.config) : null,
@@ -176,6 +182,10 @@ const sessionRouter = router({
             artifacts: output.artifacts ? JSON.parse(output.artifacts) : null,
           }
         : null,
+      eventLog: eventLogRows.map((row) => ({
+        ...row,
+        data: JSON.parse(row.data),
+      })),
     };
   }),
 
@@ -312,6 +322,20 @@ const sessionRouter = router({
         });
       }
 
+      // Copy event log
+      const eventLogRows = await ctx.db
+        .select()
+        .from(schema.eventLog)
+        .where(eq(schema.eventLog.sessionId, input.id));
+      for (const row of eventLogRows) {
+        await ctx.db.insert(schema.eventLog).values({
+          sessionId: newId,
+          type: row.type,
+          data: row.data,
+          createdAt: row.createdAt,
+        });
+      }
+
       return { sessionId: newId };
     }),
 
@@ -355,6 +379,9 @@ const sessionRouter = router({
           .delete(schema.outputPackages)
           .where(eq(schema.outputPackages.sessionId, input.id));
       }
+
+      // Always clear event log on rollback
+      await ctx.db.delete(schema.eventLog).where(eq(schema.eventLog.sessionId, input.id));
 
       // Update session status
       await ctx.db

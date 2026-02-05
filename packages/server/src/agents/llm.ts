@@ -70,6 +70,7 @@ export async function callLLM(options: LLMCallOptions): Promise<string> {
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         abortController: controller,
+        includePartialMessages: true,
         ...(outputSchema
           ? { outputFormat: { type: 'json_schema' as const, schema: outputSchema } }
           : {}),
@@ -78,6 +79,10 @@ export async function callLLM(options: LLMCallOptions): Promise<string> {
 
     let resultText = '';
     let structuredOutput: unknown = undefined;
+    let emittedGenerating = false;
+    let approxTokens = 0;
+    let lastProgressEmit = 0;
+    const PROGRESS_INTERVAL_MS = 10_000;
 
     for await (const message of stream) {
       if (message.type === 'result') {
@@ -86,6 +91,47 @@ export async function callLLM(options: LLMCallOptions): Promise<string> {
         }
         if ('result' in message) {
           resultText = message.result as string;
+        }
+      } else if (message.type === 'stream_event' && sessionId && agentName) {
+        const event = (message as any).event;
+        if (!event) continue;
+
+        if (event.type === 'content_block_start' && !emittedGenerating) {
+          emittedGenerating = true;
+          sseManager.emit(sessionId, {
+            type: 'agent:thought',
+            data: { agent: agentName, text: 'Generating response...' },
+          });
+          lastProgressEmit = Date.now();
+        } else if (event.type === 'content_block_delta') {
+          // Approximate token count from text deltas (~4 chars per token)
+          const delta = event.delta;
+          if (delta?.type === 'text_delta' && delta.text) {
+            approxTokens += Math.ceil(delta.text.length / 4);
+          } else if (delta?.type === 'input_json_delta' && delta.partial_json) {
+            approxTokens += Math.ceil(delta.partial_json.length / 4);
+          }
+
+          const now = Date.now();
+          if (now - lastProgressEmit >= PROGRESS_INTERVAL_MS && approxTokens > 0) {
+            const display =
+              approxTokens >= 1000
+                ? `~${(approxTokens / 1000).toFixed(1)}k`
+                : `~${approxTokens}`;
+            sseManager.emit(sessionId, {
+              type: 'agent:thought',
+              data: { agent: agentName, text: `Generating... (${display} tokens)` },
+            });
+            lastProgressEmit = now;
+          }
+        } else if (event.type === 'message_delta' && event.usage?.output_tokens) {
+          sseManager.emit(sessionId, {
+            type: 'agent:thought',
+            data: {
+              agent: agentName,
+              text: `Response complete (${event.usage.output_tokens.toLocaleString()} output tokens)`,
+            },
+          });
         }
       }
     }
