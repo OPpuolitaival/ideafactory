@@ -27,7 +27,7 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
           sessionId,
           domain: session.domain,
           webSearch: sessionConfig.webSearch ?? false,
-          model: config.models.navigator,
+          model: sessionConfig.models?.navigator ?? config.models.navigator,
         });
 
         sseManager.emit(sessionId, {
@@ -44,11 +44,13 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
           .where(eq(schema.sessions.id, sessionId));
         if (!session) throw new Error('Session not found');
 
+        const sessionConfig = session.config ? JSON.parse(session.config) : {};
+
         await runMethodSelection({
           sessionId,
           coordinate: session.coordinate ?? '',
           methods: getAllMethods(),
-          model: config.models.strategist,
+          model: sessionConfig.models?.strategist ?? config.models.strategist,
         });
 
         sseManager.emit(sessionId, {
@@ -64,6 +66,8 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
           .from(schema.sessions)
           .where(eq(schema.sessions.id, sessionId));
         if (!session) throw new Error('Session not found');
+
+        const sessionConfig = session.config ? JSON.parse(session.config) : {};
 
         const [methodSelection] = await db
           .select()
@@ -81,7 +85,7 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
           coordinate: session.coordinate ?? '',
           domain: session.domain,
           methods: selectedMethods,
-          model: config.models.strategist,
+          model: sessionConfig.models?.strategist ?? config.models.strategist,
         });
 
         sseManager.emit(sessionId, {
@@ -130,8 +134,8 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
           workerCount,
           ideasPerWorker,
           personas,
-          workerModel: config.models.worker,
-          analystModel: config.models.analyst,
+          workerModel: sessionConfig.models?.worker ?? config.models.worker,
+          analystModel: sessionConfig.models?.analyst ?? config.models.analyst,
         });
 
         sseManager.emit(sessionId, {
@@ -173,7 +177,7 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
           methods: selectedMethods,
           workerCount: sessionConfig.workerCount ?? config.defaults.workerCount,
           ideas: ideaRows,
-          model: config.models.analyst,
+          model: sessionConfig.models?.analyst ?? config.models.analyst,
         });
 
         // Mark session completed

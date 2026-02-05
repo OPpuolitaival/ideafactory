@@ -127,6 +127,26 @@ describe('session router', () => {
       expect(config.webSearch).toBe(true);
     });
 
+    it('stores config with models when provided', async () => {
+      const models = {
+        navigator: 'claude-haiku-4-5-20251001',
+        strategist: 'claude-sonnet-4-5-20250929',
+        worker: 'claude-opus-4-6',
+        analyst: 'claude-opus-4-6',
+      };
+      const result = await caller.session.start({
+        domain: 'chairs',
+        config: { workerCount: 3, ideasPerWorker: 15, webSearch: false, models },
+      });
+      const [row] = await db
+        .select()
+        .from(schema.sessions)
+        .where(eq(schema.sessions.id, result.sessionId));
+
+      const config = JSON.parse(row.config!);
+      expect(config.models).toEqual(models);
+    });
+
     it('fires the taxonomy pipeline in the background', async () => {
       const result = await caller.session.start({ domain: 'drones' });
       // runPipeline should have been called with the sessionId and 'taxonomy'
@@ -173,6 +193,22 @@ describe('session router', () => {
       });
     });
 
+    it('returns config with models when stored', async () => {
+      const models = {
+        navigator: 'claude-haiku-4-5-20251001',
+        strategist: 'claude-sonnet-4-5-20250929',
+        worker: 'claude-opus-4-6',
+        analyst: 'claude-opus-4-6',
+      };
+      await seedSession(db, {
+        id: 'get-models',
+        config: JSON.stringify({ workerCount: 3, ideasPerWorker: 15, webSearch: false, models }),
+      });
+
+      const result = await caller.session.get({ id: 'get-models' });
+      expect(result.config.models).toEqual(models);
+    });
+
     it('throws on a missing session id', async () => {
       await expect(caller.session.get({ id: 'nonexistent' })).rejects.toThrow('Session not found');
     });
@@ -211,8 +247,24 @@ describe('session router', () => {
       expect(item).toHaveProperty('status');
       expect(item).toHaveProperty('createdAt');
       expect(item).toHaveProperty('updatedAt');
-      // Should NOT include config or other nested data
-      expect(item).not.toHaveProperty('config');
+      expect(item).toHaveProperty('config');
+    });
+
+    it('returns parsed config with models in list', async () => {
+      const models = {
+        navigator: 'claude-haiku-4-5-20251001',
+        strategist: 'claude-sonnet-4-5-20250929',
+        worker: 'claude-opus-4-6',
+        analyst: 'claude-opus-4-6',
+      };
+      await seedSession(db, {
+        id: 'list-models',
+        config: JSON.stringify({ workerCount: 3, ideasPerWorker: 15, webSearch: false, models }),
+      });
+
+      const list = await caller.session.list();
+      const item = list.find((s) => s.id === 'list-models');
+      expect(item?.config?.models).toEqual(models);
     });
   });
 
@@ -611,13 +663,13 @@ describe('session router', () => {
       });
     }
 
-    it('rolling back to taxonomy clears all downstream data and coordinate', async () => {
+    it('rolling back to taxonomy preserves tree (clears selectedPath) and deletes all downstream', async () => {
       await seedFullSession(db, 'rb-tax');
 
       const result = await caller.session.rollback({ id: 'rb-tax', toStage: 'taxonomy' });
       expect(result).toEqual({ success: true });
 
-      // Session status should be taxonomy
+      // Session status should be taxonomy, coordinate cleared
       const [session] = await db
         .select()
         .from(schema.sessions)
@@ -625,12 +677,13 @@ describe('session router', () => {
       expect(session.status).toBe('taxonomy');
       expect(session.coordinate).toBeNull();
 
-      // Taxonomy tree should be deleted
+      // Taxonomy tree preserved but selectedPath cleared
       const taxRows = await db
         .select()
         .from(schema.taxonomyTrees)
         .where(eq(schema.taxonomyTrees.sessionId, 'rb-tax'));
-      expect(taxRows).toHaveLength(0);
+      expect(taxRows).toHaveLength(1);
+      expect(taxRows[0].selectedPath).toBeNull();
 
       // Methods should be deleted
       const methRows = await db
@@ -661,7 +714,7 @@ describe('session router', () => {
       expect(outRows).toHaveLength(0);
     });
 
-    it('rolling back to rubric preserves taxonomy and methods but clears rubric, ideas, output', async () => {
+    it('rolling back to rubric preserves taxonomy, methods, and rubric but clears ideas and output', async () => {
       await seedFullSession(db, 'rb-rub');
 
       await caller.session.rollback({ id: 'rb-rub', toStage: 'rubric' });
@@ -686,12 +739,12 @@ describe('session router', () => {
         .where(eq(schema.methodSelections.sessionId, 'rb-rub'));
       expect(methRows).toHaveLength(1);
 
-      // Rubric cleared
+      // Rubric preserved
       const rubRows = await db
         .select()
         .from(schema.rubrics)
         .where(eq(schema.rubrics.sessionId, 'rb-rub'));
-      expect(rubRows).toHaveLength(0);
+      expect(rubRows).toHaveLength(1);
 
       // Ideas cleared
       const ideaRows = await db
@@ -708,7 +761,7 @@ describe('session router', () => {
       expect(outRows).toHaveLength(0);
     });
 
-    it('rolling back to factory preserves taxonomy, methods, rubric but clears ideas and output', async () => {
+    it('rolling back to factory preserves taxonomy, methods, rubric, ideas but clears output', async () => {
       await seedFullSession(db, 'rb-fac');
 
       await caller.session.rollback({ id: 'rb-fac', toStage: 'factory' });
@@ -740,12 +793,12 @@ describe('session router', () => {
         .where(eq(schema.rubrics.sessionId, 'rb-fac'));
       expect(rubRows).toHaveLength(1);
 
-      // Ideas cleared
+      // Ideas preserved
       const ideaRows = await db
         .select()
         .from(schema.ideas)
         .where(eq(schema.ideas.sessionId, 'rb-fac'));
-      expect(ideaRows).toHaveLength(0);
+      expect(ideaRows).toHaveLength(1);
 
       // Output cleared
       const outRows = await db
@@ -755,7 +808,7 @@ describe('session router', () => {
       expect(outRows).toHaveLength(0);
     });
 
-    it('rolling back to output only clears output', async () => {
+    it('rolling back to output preserves everything including output', async () => {
       await seedFullSession(db, 'rb-out');
 
       await caller.session.rollback({ id: 'rb-out', toStage: 'output' });
@@ -766,7 +819,7 @@ describe('session router', () => {
         .where(eq(schema.sessions.id, 'rb-out'));
       expect(session.status).toBe('output');
 
-      // Everything preserved except output
+      // Everything preserved
       const taxRows = await db
         .select()
         .from(schema.taxonomyTrees)
@@ -785,15 +838,15 @@ describe('session router', () => {
         .where(eq(schema.ideas.sessionId, 'rb-out'));
       expect(ideaRows).toHaveLength(1);
 
-      // Output cleared
+      // Output preserved
       const outRows = await db
         .select()
         .from(schema.outputPackages)
         .where(eq(schema.outputPackages.sessionId, 'rb-out'));
-      expect(outRows).toHaveLength(0);
+      expect(outRows).toHaveLength(1);
     });
 
-    it('rolling back to methods clears coordinate on the session', async () => {
+    it('rolling back to methods preserves taxonomy and methods, clears rubric/ideas/output', async () => {
       await seedFullSession(db, 'rb-meth');
 
       await caller.session.rollback({ id: 'rb-meth', toStage: 'methods' });
@@ -803,20 +856,41 @@ describe('session router', () => {
         .from(schema.sessions)
         .where(eq(schema.sessions.id, 'rb-meth'));
       expect(session.status).toBe('methods');
-      // Methods stage idx (1) > taxonomy idx (0), so coordinate is NOT cleared
-      // but taxonomy tree IS preserved since stageIdx(methods)=1 > stageIdx(taxonomy)=0
+
+      // Taxonomy preserved
       const taxRows = await db
         .select()
         .from(schema.taxonomyTrees)
         .where(eq(schema.taxonomyTrees.sessionId, 'rb-meth'));
       expect(taxRows).toHaveLength(1);
 
-      // Methods IS cleared because stageIdx(methods)=1 <= stageIdx(methods)=1
+      // Methods preserved (< instead of <=)
       const methRows = await db
         .select()
         .from(schema.methodSelections)
         .where(eq(schema.methodSelections.sessionId, 'rb-meth'));
-      expect(methRows).toHaveLength(0);
+      expect(methRows).toHaveLength(1);
+
+      // Rubric cleared
+      const rubRows = await db
+        .select()
+        .from(schema.rubrics)
+        .where(eq(schema.rubrics.sessionId, 'rb-meth'));
+      expect(rubRows).toHaveLength(0);
+
+      // Ideas cleared
+      const ideaRows = await db
+        .select()
+        .from(schema.ideas)
+        .where(eq(schema.ideas.sessionId, 'rb-meth'));
+      expect(ideaRows).toHaveLength(0);
+
+      // Output cleared
+      const outRows = await db
+        .select()
+        .from(schema.outputPackages)
+        .where(eq(schema.outputPackages.sessionId, 'rb-meth'));
+      expect(outRows).toHaveLength(0);
     });
   });
 });

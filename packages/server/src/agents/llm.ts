@@ -50,7 +50,7 @@ export async function callLLM(options: LLMCallOptions): Promise<string> {
   if (sessionId && agentName) {
     sseManager.emit(sessionId, {
       type: 'agent:thought',
-      data: { agent: agentName, text: `Starting work...` },
+      data: { agent: agentName, text: `Starting work...`, model },
     });
   }
 
@@ -100,7 +100,7 @@ export async function callLLM(options: LLMCallOptions): Promise<string> {
           emittedGenerating = true;
           sseManager.emit(sessionId, {
             type: 'agent:thought',
-            data: { agent: agentName, text: 'Generating response...' },
+            data: { agent: agentName, text: 'Generating response...', model },
           });
           lastProgressEmit = Date.now();
         } else if (event.type === 'content_block_delta') {
@@ -120,7 +120,7 @@ export async function callLLM(options: LLMCallOptions): Promise<string> {
                 : `~${approxTokens}`;
             sseManager.emit(sessionId, {
               type: 'agent:thought',
-              data: { agent: agentName, text: `Generating... (${display} tokens)` },
+              data: { agent: agentName, text: `Generating... (${display} tokens)`, model },
             });
             lastProgressEmit = now;
           }
@@ -130,6 +130,7 @@ export async function callLLM(options: LLMCallOptions): Promise<string> {
             data: {
               agent: agentName,
               text: `Response complete (${event.usage.output_tokens.toLocaleString()} output tokens)`,
+              model,
             },
           });
         }
@@ -203,6 +204,7 @@ export async function callLLMWithRetry<T>(
             data: {
               agent: options.agentName,
               text: `Rate limited, waiting ${Math.round(waitMs / 1000)}s before retry...`,
+              model: options.model,
             },
           });
         }
@@ -222,6 +224,7 @@ export async function callLLMWithRetry<T>(
             data: {
               agent: options.agentName,
               text: `Output parsing failed, retrying (attempt ${attempt + 2}/${maxRetries + 1})...`,
+              model: options.model,
             },
           });
         }

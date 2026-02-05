@@ -136,6 +136,8 @@ beforeEach(() => {
     qaResults: [],
     outputPackage: null,
     thoughts: [],
+    stageModels: {},
+    sessionModels: null,
   });
 });
 
@@ -345,6 +347,18 @@ describe('Thought feed', () => {
     expect(thoughts[1].text).toBe('Second');
     expect(thoughts[2].text).toBe('Third');
   });
+
+  it('addThought stores model when provided', () => {
+    useSessionStore.getState().addThought('navigator', 'Thinking', 'claude-opus-4-6');
+    const thoughts = useSessionStore.getState().thoughts;
+    expect(thoughts[0].model).toBe('claude-opus-4-6');
+  });
+
+  it('addThought leaves model undefined when not provided', () => {
+    useSessionStore.getState().addThought('navigator', 'Thinking');
+    const thoughts = useSessionStore.getState().thoughts;
+    expect(thoughts[0].model).toBeUndefined();
+  });
 });
 
 // =========================================================================
@@ -363,6 +377,15 @@ describe('handleSSEEvent', () => {
     expect(thoughts).toHaveLength(1);
     expect(thoughts[0].agent).toBe('navigator');
     expect(thoughts[0].text).toBe('Thinking about taxonomy');
+  });
+
+  it('agent:thought passes model to thought entry', () => {
+    const event: SSEEvent = {
+      type: 'agent:thought',
+      data: { agent: 'navigator', text: 'Working', model: 'claude-opus-4-6' },
+    };
+    useSessionStore.getState().handleSSEEvent(event);
+    expect(useSessionStore.getState().thoughts[0].model).toBe('claude-opus-4-6');
   });
 
   it('agent:tool_use adds thought with "Using tool: X"', () => {
@@ -500,7 +523,7 @@ describe('handleSSEEvent', () => {
     expect(useSessionStore.getState().outputPackage).toEqual(outputPackage);
   });
 
-  it('status:stage_complete with factory stage sets factoryPhase to complete', () => {
+  it('status:stage_complete with factory stage sets factoryPhase to complete and adds checkpoint', () => {
     useSessionStore.setState({ factoryPhase: 'qa' });
 
     const event: SSEEvent = {
@@ -510,9 +533,30 @@ describe('handleSSEEvent', () => {
     useSessionStore.getState().handleSSEEvent(event);
 
     expect(useSessionStore.getState().factoryPhase).toBe('complete');
+    const thoughts = useSessionStore.getState().thoughts;
+    expect(thoughts).toHaveLength(1);
+    expect(thoughts[0].stageCheckpoint).toBe('factory');
+    expect(thoughts[0].text).toBe('Factory complete');
   });
 
-  it('status:stage_complete with non-factory stage does not change factoryPhase', () => {
+  it('status:stage_complete populates stageModels from last thought model', () => {
+    // Add a thought with model
+    const thoughtEvent: SSEEvent = {
+      type: 'agent:thought',
+      data: { agent: 'navigator', text: 'Working', model: 'claude-haiku-4-5-20251001' },
+    };
+    useSessionStore.getState().handleSSEEvent(thoughtEvent);
+
+    const stageEvent: SSEEvent = {
+      type: 'status:stage_complete',
+      data: { stage: 'taxonomy', next: 'methods' },
+    };
+    useSessionStore.getState().handleSSEEvent(stageEvent);
+
+    expect(useSessionStore.getState().stageModels).toEqual({ taxonomy: 'claude-haiku-4-5-20251001' });
+  });
+
+  it('status:stage_complete with non-factory stage does not change factoryPhase but adds checkpoint', () => {
     useSessionStore.setState({ factoryPhase: 'idle' });
 
     const event: SSEEvent = {
@@ -522,6 +566,10 @@ describe('handleSSEEvent', () => {
     useSessionStore.getState().handleSSEEvent(event);
 
     expect(useSessionStore.getState().factoryPhase).toBe('idle');
+    const thoughts = useSessionStore.getState().thoughts;
+    expect(thoughts).toHaveLength(1);
+    expect(thoughts[0].stageCheckpoint).toBe('taxonomy');
+    expect(thoughts[0].text).toBe('Taxonomy complete');
   });
 
   it('status:error sets error and clears isLoading', () => {
@@ -587,6 +635,8 @@ describe('reset', () => {
     expect(state.qaResults).toEqual([]);
     expect(state.outputPackage).toBeNull();
     expect(state.thoughts).toEqual([]);
+    expect(state.stageModels).toEqual({});
+    expect(state.sessionModels).toBeNull();
   });
 
   it('clears thoughts to empty array', () => {
@@ -620,6 +670,9 @@ describe('reset', () => {
     expect(typeof state.setQAResults).toBe('function');
     expect(typeof state.setOutputPackage).toBe('function');
     expect(typeof state.addThought).toBe('function');
+    expect(typeof state.addStageCheckpoint).toBe('function');
+    expect(typeof state.clearDownstreamState).toBe('function');
+    expect(typeof state.hydrateFromSession).toBe('function');
     expect(typeof state.handleSSEEvent).toBe('function');
     expect(typeof state.reset).toBe('function');
   });
@@ -636,5 +689,357 @@ describe('reset', () => {
     expect(state.domain).toBe('AI');
     expect(state.thoughts).toHaveLength(1);
     expect(state.thoughts[0].text).toBe('Post-reset thought');
+  });
+});
+
+// =========================================================================
+// addStageCheckpoint
+// =========================================================================
+
+describe('addStageCheckpoint', () => {
+  it('adds a thought entry with stageCheckpoint field', () => {
+    useSessionStore.getState().addStageCheckpoint('taxonomy');
+    const thoughts = useSessionStore.getState().thoughts;
+    expect(thoughts).toHaveLength(1);
+    expect(thoughts[0].stageCheckpoint).toBe('taxonomy');
+    expect(thoughts[0].agent).toBe('system');
+    expect(thoughts[0].text).toBe('Taxonomy complete');
+  });
+
+  it('uses the stage label from STAGES', () => {
+    useSessionStore.getState().addStageCheckpoint('factory');
+    const thoughts = useSessionStore.getState().thoughts;
+    expect(thoughts[0].text).toBe('Factory complete');
+  });
+
+  it('appends to existing thoughts', () => {
+    useSessionStore.getState().addThought('navigator', 'thinking...');
+    useSessionStore.getState().addStageCheckpoint('taxonomy');
+    useSessionStore.getState().addThought('strategist', 'planning...');
+    expect(useSessionStore.getState().thoughts).toHaveLength(3);
+    expect(useSessionStore.getState().thoughts[1].stageCheckpoint).toBe('taxonomy');
+  });
+});
+
+// =========================================================================
+// clearDownstreamState
+// =========================================================================
+
+describe('clearDownstreamState', () => {
+  beforeEach(() => {
+    // Populate full state
+    useSessionStore.setState({
+      sessionId: 'sess-1',
+      domain: 'Robotics',
+      stage: 'output',
+      isLoading: true,
+      error: 'some error',
+      taxonomy: taxonomyNode,
+      selectedPath: ['Root', 'Child'],
+      recommendedMethods: [1, 3],
+      methodReasoning: { '1': 'reason' },
+      selectedMethods: [1, 3],
+      rubric: rubric,
+      factoryPhase: 'complete',
+      scoredIdeas: [scoredIdea],
+      evolvedIdeas: [evolvedIdea],
+      qaResults: [qaResult],
+      outputPackage: outputPackage,
+      stageModels: {
+        taxonomy: 'claude-haiku-4-5-20251001',
+        methods: 'claude-sonnet-4-5-20250929',
+        rubric: 'claude-sonnet-4-5-20250929',
+        factory: 'claude-opus-4-6',
+      },
+    });
+    useSessionStore.getState().addThought('test', 'thought');
+  });
+
+  it('rolling back to taxonomy clears selectedPath and all downstream', () => {
+    useSessionStore.getState().clearDownstreamState('taxonomy');
+    const s = useSessionStore.getState();
+    expect(s.stage).toBe('taxonomy');
+    expect(s.taxonomy).toEqual(taxonomyNode); // preserved
+    expect(s.selectedPath).toEqual([]); // cleared
+    expect(s.recommendedMethods).toEqual([]);
+    expect(s.methodReasoning).toEqual({});
+    expect(s.selectedMethods).toEqual([]);
+    expect(s.rubric).toBeNull();
+    expect(s.factoryPhase).toBe('idle');
+    expect(s.workerIdeas.size).toBe(0);
+    expect(s.scoredIdeas).toEqual([]);
+    expect(s.evolvedIdeas).toEqual([]);
+    expect(s.qaResults).toEqual([]);
+    expect(s.outputPackage).toBeNull();
+    expect(s.thoughts).toEqual([]);
+    expect(s.isLoading).toBe(false);
+    expect(s.error).toBeNull();
+    expect(s.stageModels).toEqual({});
+  });
+
+  it('rolling back to methods preserves taxonomy and methods, clears rubric+', () => {
+    useSessionStore.getState().clearDownstreamState('methods');
+    const s = useSessionStore.getState();
+    expect(s.stage).toBe('methods');
+    expect(s.taxonomy).toEqual(taxonomyNode);
+    expect(s.selectedPath).toEqual(['Root', 'Child']); // NOT cleared (taxonomy special-case only)
+    expect(s.recommendedMethods).toEqual([1, 3]); // preserved
+    expect(s.selectedMethods).toEqual([1, 3]); // preserved
+    expect(s.rubric).toBeNull();
+    expect(s.factoryPhase).toBe('idle');
+    expect(s.outputPackage).toBeNull();
+  });
+
+  it('rolling back to rubric preserves taxonomy, methods, rubric, clears factory+', () => {
+    useSessionStore.getState().clearDownstreamState('rubric');
+    const s = useSessionStore.getState();
+    expect(s.stage).toBe('rubric');
+    expect(s.rubric).toEqual(rubric); // preserved
+    expect(s.factoryPhase).toBe('idle');
+    expect(s.scoredIdeas).toEqual([]);
+    expect(s.outputPackage).toBeNull();
+    // stageModels: taxonomy and methods preserved (indices 0 and 1 are < rubric index 2)
+    expect(s.stageModels).toEqual({
+      taxonomy: 'claude-haiku-4-5-20251001',
+      methods: 'claude-sonnet-4-5-20250929',
+    });
+  });
+
+  it('rolling back to factory preserves everything except output', () => {
+    useSessionStore.getState().clearDownstreamState('factory');
+    const s = useSessionStore.getState();
+    expect(s.stage).toBe('factory');
+    expect(s.rubric).toEqual(rubric);
+    expect(s.scoredIdeas).toEqual([scoredIdea]); // preserved
+    expect(s.outputPackage).toBeNull();
+  });
+
+  it('rolling back to output preserves everything', () => {
+    useSessionStore.getState().clearDownstreamState('output');
+    const s = useSessionStore.getState();
+    expect(s.stage).toBe('output');
+    expect(s.outputPackage).toEqual(outputPackage); // preserved
+  });
+
+  it('preserves sessionId and domain', () => {
+    useSessionStore.getState().clearDownstreamState('taxonomy');
+    const s = useSessionStore.getState();
+    expect(s.sessionId).toBe('sess-1');
+    expect(s.domain).toBe('Robotics');
+  });
+});
+
+// =========================================================================
+// hydrateFromSession
+// =========================================================================
+
+describe('hydrateFromSession', () => {
+  it('hydrates basic session fields', () => {
+    useSessionStore.getState().hydrateFromSession({
+      id: 'hydrate-1',
+      domain: 'Drones',
+      status: 'methods',
+      coordinate: 'A > B',
+      taxonomy: null,
+      methods: null,
+      rubric: null,
+      ideas: [],
+      output: null,
+      eventLog: [],
+    });
+
+    const s = useSessionStore.getState();
+    expect(s.sessionId).toBe('hydrate-1');
+    expect(s.domain).toBe('Drones');
+    expect(s.stage).toBe('methods');
+  });
+
+  it('hydrates taxonomy with selectedPath', () => {
+    useSessionStore.getState().hydrateFromSession({
+      id: 'hydrate-2',
+      domain: 'Chairs',
+      status: 'rubric',
+      coordinate: 'Root > Child',
+      taxonomy: { tree: taxonomyNode, selectedPath: ['Root', 'Child'] },
+      methods: null,
+      rubric: null,
+      ideas: [],
+      output: null,
+      eventLog: [],
+    });
+
+    const s = useSessionStore.getState();
+    expect(s.taxonomy).toEqual(taxonomyNode);
+    expect(s.selectedPath).toEqual(['Root', 'Child']);
+  });
+
+  it('hydrates methods', () => {
+    useSessionStore.getState().hydrateFromSession({
+      id: 'hydrate-3',
+      domain: 'Chairs',
+      status: 'rubric',
+      coordinate: null,
+      taxonomy: null,
+      methods: {
+        recommended: [1, 3],
+        reasoning: { '1': 'Good', '3': 'Also good' },
+        selected: [1],
+      },
+      rubric: null,
+      ideas: [],
+      output: null,
+      eventLog: [],
+    });
+
+    const s = useSessionStore.getState();
+    expect(s.recommendedMethods).toEqual([1, 3]);
+    expect(s.methodReasoning).toEqual({ '1': 'Good', '3': 'Also good' });
+    expect(s.selectedMethods).toEqual([1]);
+  });
+
+  it('hydrates rubric', () => {
+    useSessionStore.getState().hydrateFromSession({
+      id: 'hydrate-4',
+      domain: 'Chairs',
+      status: 'factory',
+      coordinate: null,
+      taxonomy: null,
+      methods: null,
+      rubric: rubric,
+      ideas: [],
+      output: null,
+      eventLog: [],
+    });
+
+    expect(useSessionStore.getState().rubric).toEqual(rubric);
+  });
+
+  it('hydrates output package', () => {
+    useSessionStore.getState().hydrateFromSession({
+      id: 'hydrate-5',
+      domain: 'Chairs',
+      status: 'completed',
+      coordinate: null,
+      taxonomy: null,
+      methods: null,
+      rubric: null,
+      ideas: [],
+      output: { package: outputPackage, artifacts: null },
+      eventLog: [],
+    });
+
+    expect(useSessionStore.getState().outputPackage).toEqual(outputPackage);
+  });
+
+  it('hydrates diverge ideas grouped by worker', () => {
+    useSessionStore.getState().hydrateFromSession({
+      id: 'hydrate-6',
+      domain: 'Chairs',
+      status: 'factory',
+      coordinate: null,
+      taxonomy: null,
+      methods: null,
+      rubric: null,
+      ideas: [
+        { id: 'i1', phase: 'diverge', workerId: 'w0', data: rawIdea },
+        { id: 'i2', phase: 'diverge', workerId: 'w0', data: rawIdea2 },
+        { id: 'i3', phase: 'diverge', workerId: 'w1', data: rawIdeaWorker1 },
+      ],
+      output: null,
+      eventLog: [],
+    });
+
+    const s = useSessionStore.getState();
+    expect(s.workerIdeas.get('w0')).toHaveLength(2);
+    expect(s.workerIdeas.get('w1')).toHaveLength(1);
+    expect(s.factoryPhase).toBe('diverge');
+  });
+
+  it('hydrates event log as thoughts', () => {
+    useSessionStore.getState().hydrateFromSession({
+      id: 'hydrate-7',
+      domain: 'Chairs',
+      status: 'taxonomy',
+      coordinate: null,
+      taxonomy: null,
+      methods: null,
+      rubric: null,
+      ideas: [],
+      output: null,
+      eventLog: [
+        { type: 'agent:thought', data: { agent: 'navigator', text: 'Exploring...' } },
+        { type: 'agent:tool_use', data: { agent: 'strategist', tool: 'web_search' } },
+      ],
+    });
+
+    const thoughts = useSessionStore.getState().thoughts;
+    expect(thoughts).toHaveLength(2);
+    expect(thoughts[0].text).toBe('Exploring...');
+    expect(thoughts[1].text).toBe('Using tool: web_search');
+  });
+
+  it('hydrates event log with model data and reconstructs stageModels', () => {
+    useSessionStore.getState().hydrateFromSession({
+      id: 'hydrate-models',
+      domain: 'Chairs',
+      status: 'methods',
+      coordinate: null,
+      taxonomy: null,
+      methods: null,
+      rubric: null,
+      ideas: [],
+      output: null,
+      eventLog: [
+        { type: 'agent:thought', data: { agent: 'navigator', text: 'Working', model: 'claude-haiku-4-5-20251001' } },
+        { type: 'status:stage_complete', data: { stage: 'taxonomy', next: 'methods' } },
+      ],
+    });
+
+    const s = useSessionStore.getState();
+    expect(s.thoughts[0].model).toBe('claude-haiku-4-5-20251001');
+    expect(s.stageModels).toEqual({ taxonomy: 'claude-haiku-4-5-20251001' });
+  });
+
+  it('hydrates sessionModels from config', () => {
+    const models = {
+      navigator: 'claude-haiku-4-5-20251001',
+      strategist: 'claude-sonnet-4-5-20250929',
+      worker: 'claude-opus-4-6',
+      analyst: 'claude-opus-4-6',
+    };
+    useSessionStore.getState().hydrateFromSession({
+      id: 'hydrate-sm',
+      domain: 'Chairs',
+      status: 'taxonomy',
+      coordinate: null,
+      config: { models },
+      taxonomy: null,
+      methods: null,
+      rubric: null,
+      ideas: [],
+      output: null,
+      eventLog: [],
+    });
+
+    expect(useSessionStore.getState().sessionModels).toEqual(models);
+  });
+
+  it('sets factoryPhase to complete when status is output', () => {
+    useSessionStore.getState().hydrateFromSession({
+      id: 'hydrate-8',
+      domain: 'Chairs',
+      status: 'output',
+      coordinate: null,
+      taxonomy: null,
+      methods: null,
+      rubric: null,
+      ideas: [
+        { id: 'i1', phase: 'diverge', workerId: 'w0', data: rawIdea },
+      ],
+      output: null,
+      eventLog: [],
+    });
+
+    expect(useSessionStore.getState().factoryPhase).toBe('complete');
   });
 });

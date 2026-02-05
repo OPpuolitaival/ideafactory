@@ -6,8 +6,8 @@ import type { QAResult } from './schemas/qa.js';
 import type { OutputPackage } from './schemas/output.js';
 
 export type SSEEvent =
-  | { type: 'agent:thought'; data: { agent: string; text: string } }
-  | { type: 'agent:tool_use'; data: { agent: string; tool: string } }
+  | { type: 'agent:thought'; data: { agent: string; text: string; model?: string } }
+  | { type: 'agent:tool_use'; data: { agent: string; tool: string; model?: string } }
   | { type: 'data:taxonomy_update'; data: TaxonomyNode }
   | { type: 'data:methods_recommended'; data: MethodRecommendation }
   | { type: 'data:rubric_generated'; data: Rubric }

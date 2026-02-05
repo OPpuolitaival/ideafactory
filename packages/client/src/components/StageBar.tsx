@@ -1,9 +1,20 @@
 import { useSessionStore } from '../store/index.js';
-import { STAGES, STAGE_ORDER } from '@ideafactory/shared';
+import { STAGES, STAGE_ORDER, MODEL_OPTIONS } from '@ideafactory/shared';
 import type { Stage } from '@ideafactory/shared';
 
-export function StageBar() {
+function getModelColor(model?: string): string | undefined {
+  const opt = MODEL_OPTIONS.find((m) => m.id === model);
+  return opt?.color;
+}
+
+interface StageBarProps {
+  onStageClick?: (stage: Stage) => void;
+}
+
+export function StageBar({ onStageClick }: StageBarProps) {
   const currentStage = useSessionStore((s) => s.stage);
+  const isLoading = useSessionStore((s) => s.isLoading);
+  const stageModels = useSessionStore((s) => s.stageModels);
   const currentIdx = STAGE_ORDER.indexOf(currentStage);
 
   return (
@@ -14,6 +25,7 @@ export function StageBar() {
           const isCurrent = stage.id === currentStage;
           const isComplete = stageIdx < currentIdx;
           const isFuture = stageIdx > currentIdx;
+          const isClickable = isComplete && !isLoading && onStageClick;
 
           return (
             <div key={stage.id} className="flex items-center">
@@ -25,6 +37,7 @@ export function StageBar() {
                 />
               )}
               <div
+                onClick={isClickable ? () => onStageClick(stage.id as Stage) : undefined}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 ${
                   isCurrent
                     ? 'bg-accent/20 text-accent-light border border-accent/30'
@@ -33,7 +46,7 @@ export function StageBar() {
                       : isFuture
                         ? 'text-gray-500'
                         : ''
-                }`}
+                } ${isClickable ? 'cursor-pointer hover:bg-accent/10' : ''}`}
               >
                 <span
                   className={`flex items-center justify-center w-5 h-5 rounded-full text-xs ${
@@ -47,6 +60,12 @@ export function StageBar() {
                   {isComplete ? '✓' : stage.number}
                 </span>
                 <span>{stage.label}</span>
+                {isComplete && stageModels[stage.id] && (
+                  <span
+                    className="w-1.5 h-1.5 rounded-full"
+                    style={{ backgroundColor: getModelColor(stageModels[stage.id]) }}
+                  />
+                )}
               </div>
             </div>
           );

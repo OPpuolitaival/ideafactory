@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { trpc } from '../trpc/index.js';
 import { useSessionStore } from '../store/index.js';
+import { ModelSelector } from './ModelSelector.js';
+import { MODEL_OPTIONS } from '@ideafactory/shared';
 
 interface DashboardProps {
   onStartSession: () => void;
@@ -8,14 +10,28 @@ interface DashboardProps {
 
 export function Dashboard({ onStartSession }: DashboardProps) {
   const [domain, setDomain] = useState('');
+  const [modelsOpen, setModelsOpen] = useState(false);
+  const configQuery = trpc.config.getConfig.useQuery();
   const sessionsQuery = trpc.session.list.useQuery();
   const startMutation = trpc.session.start.useMutation();
   const deleteMutation = trpc.session.delete.useMutation();
+  const duplicateMutation = trpc.session.duplicate.useMutation();
   const store = useSessionStore();
+
+  const defaultModels = configQuery.data?.models;
+  const [models, setModels] = useState({
+    navigator: defaultModels?.navigator ?? 'claude-opus-4-6',
+    strategist: defaultModels?.strategist ?? 'claude-opus-4-6',
+    worker: defaultModels?.worker ?? 'claude-opus-4-6',
+    analyst: defaultModels?.analyst ?? 'claude-opus-4-6',
+  });
 
   const handleStart = async () => {
     if (!domain.trim()) return;
-    const result = await startMutation.mutateAsync({ domain: domain.trim() });
+    const result = await startMutation.mutateAsync({
+      domain: domain.trim(),
+      config: { models },
+    });
     store.setSessionId(result.sessionId);
     store.setDomain(domain.trim());
     store.setStage('taxonomy');
@@ -29,88 +45,13 @@ export function Dashboard({ onStartSession }: DashboardProps) {
     const session = sessionsQuery.data?.find((s) => s.id === id);
     if (!session) return;
 
-    store.setSessionId(id);
-    store.setDomain(session.domain);
-    store.setStage(session.status as any);
-
-    // Fetch full session data and hydrate store
     try {
       const full = await utils.session.get.fetch({ id });
-      if (full.taxonomy?.tree) {
-        store.setTaxonomy(full.taxonomy.tree);
-        if (full.taxonomy.selectedPath) {
-          store.setSelectedPath(full.taxonomy.selectedPath);
-        }
-      }
-      if (full.methods) {
-        store.setMethodRecommendations(full.methods.recommended, full.methods.reasoning);
-        store.setSelectedMethods(full.methods.selected);
-      }
-      if (full.rubric) {
-        store.setRubric(full.rubric);
-      }
-      if (full.output?.package) {
-        store.setOutputPackage(full.output.package);
-      }
-
-      // Hydrate factory ideas by phase
-      if (full.ideas && full.ideas.length > 0) {
-        const divergeIdeas = full.ideas.filter((i) => i.phase === 'diverge');
-        const convergeIdeas = full.ideas.filter((i) => i.phase === 'converge');
-        const evolveIdeas = full.ideas.filter((i) => i.phase === 'evolve');
-        const qaIdeas = full.ideas.filter((i) => i.phase === 'qa');
-
-        // Diverge: group by workerId and add each idea
-        for (const idea of divergeIdeas) {
-          if (idea.workerId && idea.data) {
-            store.addWorkerIdea(idea.workerId, idea.data);
-          }
-        }
-
-        // Converge
-        if (convergeIdeas.length > 0) {
-          store.setScoredIdeas(convergeIdeas.filter((i) => i.data).map((i) => i.data));
-        }
-
-        // Evolve
-        if (evolveIdeas.length > 0) {
-          store.setEvolvedIdeas(evolveIdeas.filter((i) => i.data).map((i) => i.data));
-        }
-
-        // QA
-        if (qaIdeas.length > 0) {
-          store.setQAResults(qaIdeas.filter((i) => i.data).map((i) => i.data));
-        }
-
-        // Determine factory phase from what data exists
-        if (qaIdeas.length > 0) {
-          store.setFactoryPhase('qa');
-        } else if (evolveIdeas.length > 0) {
-          store.setFactoryPhase('evolve');
-        } else if (convergeIdeas.length > 0) {
-          store.setFactoryPhase('converge');
-        } else if (divergeIdeas.length > 0) {
-          store.setFactoryPhase('diverge');
-        }
-
-        // If stage is past factory, mark factory complete
-        if (session.status === 'output' || session.status === 'completed') {
-          store.setFactoryPhase('complete');
-        }
-      }
-
-      // Hydrate thoughts from event log
-      if (full.eventLog) {
-        for (const entry of full.eventLog) {
-          if (entry.type === 'agent:thought') {
-            store.addThought(entry.data.agent, entry.data.text);
-          } else if (entry.type === 'agent:tool_use') {
-            store.addThought(entry.data.agent, `Using tool: ${entry.data.tool}`);
-          }
-        }
-      }
+      store.hydrateFromSession(full);
     } catch {
-      // Session data fetch failed, continue with empty store
+      store.setSessionId(id);
+      store.setDomain(session.domain);
+      store.setStage(session.status as any);
     }
 
     onStartSession();
@@ -118,6 +59,11 @@ export function Dashboard({ onStartSession }: DashboardProps) {
 
   const handleDelete = async (id: string) => {
     await deleteMutation.mutateAsync({ id });
+    sessionsQuery.refetch();
+  };
+
+  const handleDuplicate = async (id: string) => {
+    await duplicateMutation.mutateAsync({ id });
     sessionsQuery.refetch();
   };
 
@@ -145,6 +91,38 @@ export function Dashboard({ onStartSession }: DashboardProps) {
           >
             {startMutation.isPending ? 'Starting...' : 'Generate'}
           </button>
+        </div>
+        <div className="mt-3">
+          <button
+            onClick={() => setModelsOpen(!modelsOpen)}
+            className="btn-ghost text-xs text-gray-400"
+          >
+            {modelsOpen ? '▾' : '▸'} Models
+          </button>
+          {modelsOpen && (
+            <div className="mt-2 space-y-2 p-3 bg-bg-1 rounded-lg border border-bg-3">
+              <ModelSelector
+                role="Navigator"
+                value={models.navigator}
+                onChange={(v) => setModels((m) => ({ ...m, navigator: v }))}
+              />
+              <ModelSelector
+                role="Strategist"
+                value={models.strategist}
+                onChange={(v) => setModels((m) => ({ ...m, strategist: v }))}
+              />
+              <ModelSelector
+                role="Worker"
+                value={models.worker}
+                onChange={(v) => setModels((m) => ({ ...m, worker: v }))}
+              />
+              <ModelSelector
+                role="Analyst"
+                value={models.analyst}
+                onChange={(v) => setModels((m) => ({ ...m, analyst: v }))}
+              />
+            </div>
+          )}
         </div>
       </div>
 
@@ -185,17 +163,44 @@ export function Dashboard({ onStartSession }: DashboardProps) {
                   >
                     {session.status === 'completed' ? 'Completed' : `In progress: ${session.status}`}
                   </span>
+                  {session.config?.models && (() => {
+                    const sm = session.config.models;
+                    const allSame = sm.navigator === sm.strategist && sm.strategist === sm.worker && sm.worker === sm.analyst;
+                    const opt = MODEL_OPTIONS.find((o) => o.id === sm.navigator);
+                    return (
+                      <span
+                        className="badge"
+                        style={allSame && opt
+                          ? { backgroundColor: `${opt.color}20`, color: opt.color }
+                          : { backgroundColor: 'rgba(110,86,207,0.2)', color: '#8b78e6' }
+                        }
+                      >
+                        {allSame && opt ? opt.label : 'Mixed'}
+                      </span>
+                    );
+                  })()}
                 </div>
               </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDelete(session.id);
-                }}
-                className="btn-ghost text-danger text-sm"
-              >
-                Delete
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDuplicate(session.id);
+                  }}
+                  className="btn-ghost text-sm"
+                >
+                  Duplicate
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDelete(session.id);
+                  }}
+                  className="btn-ghost text-danger text-sm"
+                >
+                  Delete
+                </button>
+              </div>
             </div>
           ))}
         </div>

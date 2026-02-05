@@ -1,4 +1,6 @@
 import { trpc } from '../trpc/index.js';
+import { useSessionStore } from '../store/index.js';
+import { ModelSelector } from './ModelSelector.js';
 
 interface SettingsDialogProps {
   onClose: () => void;
@@ -6,6 +8,8 @@ interface SettingsDialogProps {
 
 export function SettingsDialog({ onClose }: SettingsDialogProps) {
   const configQuery = trpc.config.getConfig.useQuery();
+  const sessionModels = useSessionStore((s) => s.sessionModels);
+  const sessionId = useSessionStore((s) => s.sessionId);
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
@@ -24,6 +28,19 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
               Authentication is handled automatically via Claude Code or the ANTHROPIC_API_KEY environment variable.
             </p>
           </div>
+
+          {/* Session Models (read-only) */}
+          {sessionId && sessionModels && (
+            <div>
+              <label className="block text-sm font-medium mb-2">Session Models</label>
+              <div className="space-y-2 p-3 bg-bg-1 rounded-lg border border-bg-3">
+                <ModelSelector role="Navigator" value={sessionModels.navigator} onChange={() => {}} disabled />
+                <ModelSelector role="Strategist" value={sessionModels.strategist} onChange={() => {}} disabled />
+                <ModelSelector role="Worker" value={sessionModels.worker} onChange={() => {}} disabled />
+                <ModelSelector role="Analyst" value={sessionModels.analyst} onChange={() => {}} disabled />
+              </div>
+            </div>
+          )}
 
           {/* Current Config */}
           {configQuery.data && (

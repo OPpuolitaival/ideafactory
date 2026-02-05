@@ -11,6 +11,9 @@
   --color-danger: #e5484d;
   --color-warning: #f5a623;
   --color-info: #3e63dd;
+  --color-model-haiku: #30a46c;
+  --color-model-sonnet: #3e63dd;
+  --color-model-opus: #f5a623;
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', Menlo, Monaco, monospace;
 }

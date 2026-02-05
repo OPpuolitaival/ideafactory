@@ -15,11 +15,21 @@ export const PersonaSchema = z.object({
 
 export type Persona = z.infer<typeof PersonaSchema>;
 
+export const SessionModelsSchema = z.object({
+  navigator: z.string(),
+  strategist: z.string(),
+  worker: z.string(),
+  analyst: z.string(),
+});
+
+export type SessionModels = z.infer<typeof SessionModelsSchema>;
+
 export const SessionConfigSchema = z.object({
   workerCount: z.number().min(1).max(5).default(3),
   ideasPerWorker: z.number().min(5).max(30).default(15),
   webSearch: z.boolean().default(false),
   personas: z.array(z.string()).optional(),
+  models: SessionModelsSchema.optional(),
 });
 
 export type SessionConfig = z.infer<typeof SessionConfigSchema>;

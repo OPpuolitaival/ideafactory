@@ -198,11 +198,15 @@ const sessionRouter = router({
         status: schema.sessions.status,
         createdAt: schema.sessions.createdAt,
         updatedAt: schema.sessions.updatedAt,
+        config: schema.sessions.config,
       })
       .from(schema.sessions)
       .orderBy(schema.sessions.updatedAt);
 
-    return rows.reverse();
+    return rows.reverse().map((row) => ({
+      ...row,
+      config: row.config ? JSON.parse(row.config) : null,
+    }));
   }),
 
   delete: publicProcedure
@@ -349,10 +353,11 @@ const sessionRouter = router({
     .mutation(async ({ ctx, input }) => {
       const stageIdx = STAGE_ORDER.indexOf(input.toStage);
 
-      // Delete data from stages after the target
-      if (stageIdx <= STAGE_ORDER.indexOf('taxonomy')) {
+      // Special: taxonomy rollback clears selectedPath (preserve tree for re-selection)
+      if (input.toStage === 'taxonomy') {
         await ctx.db
-          .delete(schema.taxonomyTrees)
+          .update(schema.taxonomyTrees)
+          .set({ selectedPath: null })
           .where(eq(schema.taxonomyTrees.sessionId, input.id));
         await ctx.db
           .update(schema.sessions)
@@ -360,21 +365,22 @@ const sessionRouter = router({
           .where(eq(schema.sessions.id, input.id));
       }
 
-      if (stageIdx <= STAGE_ORDER.indexOf('methods')) {
+      // Delete data for stages AFTER the target (< instead of <=)
+      if (stageIdx < STAGE_ORDER.indexOf('methods')) {
         await ctx.db
           .delete(schema.methodSelections)
           .where(eq(schema.methodSelections.sessionId, input.id));
       }
 
-      if (stageIdx <= STAGE_ORDER.indexOf('rubric')) {
+      if (stageIdx < STAGE_ORDER.indexOf('rubric')) {
         await ctx.db.delete(schema.rubrics).where(eq(schema.rubrics.sessionId, input.id));
       }
 
-      if (stageIdx <= STAGE_ORDER.indexOf('factory')) {
+      if (stageIdx < STAGE_ORDER.indexOf('factory')) {
         await ctx.db.delete(schema.ideas).where(eq(schema.ideas.sessionId, input.id));
       }
 
-      if (stageIdx <= STAGE_ORDER.indexOf('output')) {
+      if (stageIdx < STAGE_ORDER.indexOf('output')) {
         await ctx.db
           .delete(schema.outputPackages)
           .where(eq(schema.outputPackages.sessionId, input.id));

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useSessionStore } from '../store/index.js';
 import { useSSE } from '../hooks/useSSE.js';
+import { trpc } from '../trpc/index.js';
 import { Topbar } from './Topbar.js';
 import { StageBar } from './StageBar.js';
 import { ThoughtFeed } from './ThoughtFeed.js';
@@ -11,6 +12,10 @@ import { RubricStage } from './stages/RubricStage.js';
 import { FactoryStage } from './stages/FactoryStage.js';
 import { OutputStage } from './stages/OutputStage.js';
 import { SettingsDialog } from './SettingsDialog.js';
+import { RollbackModal } from './RollbackModal.js';
+import type { Stage } from '@ideafactory/shared';
+
+type RollbackStage = Exclude<Stage, 'completed'>;
 
 export function App() {
   const sessionId = useSessionStore((s) => s.sessionId);
@@ -18,6 +23,11 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showDashboard, setShowDashboard] = useState(true);
   const [thoughtsOpen, setThoughtsOpen] = useState(true);
+  const [rollbackTarget, setRollbackTarget] = useState<RollbackStage | null>(null);
+
+  const rollbackMutation = trpc.session.rollback.useMutation();
+  const duplicateMutation = trpc.session.duplicate.useMutation();
+  const utils = trpc.useUtils();
 
   useSSE(sessionId);
 
@@ -28,6 +38,25 @@ export function App() {
   const handleBackToDashboard = () => {
     useSessionStore.getState().reset();
     setShowDashboard(true);
+  };
+
+  const handleRollback = async (targetStage: RollbackStage) => {
+    if (!sessionId) return;
+    setRollbackTarget(null);
+    await rollbackMutation.mutateAsync({ id: sessionId, toStage: targetStage });
+    useSessionStore.getState().clearDownstreamState(targetStage);
+    const full = await utils.session.get.fetch({ id: sessionId });
+    useSessionStore.getState().hydrateFromSession(full);
+  };
+
+  const handleDuplicateAndRollback = async (targetStage: RollbackStage) => {
+    if (!sessionId) return;
+    setRollbackTarget(null);
+    const { sessionId: newId } = await duplicateMutation.mutateAsync({ id: sessionId });
+    await rollbackMutation.mutateAsync({ id: newId, toStage: targetStage });
+    useSessionStore.getState().reset();
+    const full = await utils.session.get.fetch({ id: newId });
+    useSessionStore.getState().hydrateFromSession(full);
   };
 
   if (showDashboard && !sessionId) {
@@ -67,7 +96,7 @@ export function App() {
         onSettingsClick={() => setShowSettings(true)}
         onSessionsClick={handleBackToDashboard}
       />
-      <StageBar />
+      <StageBar onStageClick={(s) => setRollbackTarget(s as RollbackStage)} />
       <div className="flex-1 flex overflow-hidden">
         <main className="flex-1 overflow-y-auto p-6">{stageComponent}</main>
         {thoughtsOpen && (
@@ -85,6 +114,14 @@ export function App() {
         )}
       </div>
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
+      {rollbackTarget && (
+        <RollbackModal
+          targetStage={rollbackTarget}
+          onEditSession={() => handleRollback(rollbackTarget)}
+          onDuplicateAndEdit={() => handleDuplicateAndRollback(rollbackTarget)}
+          onCancel={() => setRollbackTarget(null)}
+        />
+      )}
     </div>
   );
 }

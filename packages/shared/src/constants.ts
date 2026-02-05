@@ -119,6 +119,12 @@ export const SSE_EVENTS = {
   ERROR: 'status:error',
 } as const;
 
+export const MODEL_OPTIONS = [
+  { id: 'claude-haiku-4-5-20251001', label: 'Haiku', color: '#30a46c' },
+  { id: 'claude-sonnet-4-5-20250929', label: 'Sonnet', color: '#3e63dd' },
+  { id: 'claude-opus-4-6', label: 'Opus', color: '#f5a623' },
+] as const;
+
 export const DEFAULT_CONFIG = {
   workerCount: 3,
   ideasPerWorker: 15,

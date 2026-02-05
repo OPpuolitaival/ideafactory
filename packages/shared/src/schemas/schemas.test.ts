@@ -768,6 +768,48 @@ describe('SessionConfigSchema', () => {
       expect(result.data.personas).toEqual(['The Engineer', 'The Visionary']);
     }
   });
+
+  it('accepts optional models field with all roles', () => {
+    const result = SessionConfigSchema.safeParse({
+      models: {
+        navigator: 'claude-haiku-4-5-20251001',
+        strategist: 'claude-sonnet-4-5-20250929',
+        worker: 'claude-opus-4-6',
+        analyst: 'claude-opus-4-6',
+      },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.models).toEqual({
+        navigator: 'claude-haiku-4-5-20251001',
+        strategist: 'claude-sonnet-4-5-20250929',
+        worker: 'claude-opus-4-6',
+        analyst: 'claude-opus-4-6',
+      });
+    }
+  });
+
+  it('accepts config without models field', () => {
+    const result = SessionConfigSchema.safeParse({
+      workerCount: 3,
+      ideasPerWorker: 15,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.models).toBeUndefined();
+    }
+  });
+
+  it('rejects models with missing role', () => {
+    const result = SessionConfigSchema.safeParse({
+      models: {
+        navigator: 'claude-haiku-4-5-20251001',
+        strategist: 'claude-sonnet-4-5-20250929',
+        // missing worker and analyst
+      },
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
