@@ -11,7 +11,7 @@ export interface LLMCallOptions {
   timeoutMs?: number;
 }
 
-const AGENT_TIMEOUT_MS = 120_000;
+const AGENT_TIMEOUT_MS = 300_000;
 
 function isRateLimitError(error: unknown): boolean {
   if (error instanceof Error && error.message.includes('429')) return true;

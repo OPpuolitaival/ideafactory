@@ -1,6 +1,19 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  --color-bg-0: #0a0a0f;
+  --color-bg-1: #12121a;
+  --color-bg-2: #1a1a26;
+  --color-bg-3: #222233;
+  --color-accent: #6e56cf;
+  --color-accent-light: #8b78e6;
+  --color-success: #30a46c;
+  --color-danger: #e5484d;
+  --color-warning: #f5a623;
+  --color-info: #3e63dd;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', Menlo, Monaco, monospace;
+}
 
 @layer base {
   * {
@@ -34,96 +47,89 @@
   }
 }
 
-@layer components {
-  .card {
-    @apply rounded-lg p-4 transition-all duration-200;
-    background-color: #1a1a26;
-    border: 1px solid #222233;
-  }
+@utility card {
+  @apply rounded-lg p-4 transition-all duration-200;
+  background-color: #1a1a26;
+  border: 1px solid #222233;
+}
 
-  .card-hover {
-    @apply rounded-lg p-4 transition-all duration-200 cursor-pointer;
-    background-color: #1a1a26;
-    border: 1px solid #222233;
-  }
-
-  .card-hover:hover {
+@utility card-hover {
+  @apply rounded-lg p-4 transition-all duration-200 cursor-pointer;
+  background-color: #1a1a26;
+  border: 1px solid #222233;
+  &:hover {
     border-color: rgb(110 86 207 / 0.5);
     box-shadow: 0 10px 15px -3px rgb(110 86 207 / 0.05);
   }
+}
 
-  .btn {
-    @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
-  }
+@utility btn {
+  @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+}
 
-  .btn-primary {
-    @apply btn text-white;
-    background-color: #6e56cf;
-  }
-
-  .btn-primary:hover {
+@utility btn-primary {
+  @apply btn text-white;
+  background-color: #6e56cf;
+  &:hover {
     background-color: #8b78e6;
   }
+}
 
-  .btn-secondary {
-    @apply btn text-gray-200;
-    background-color: #222233;
-  }
-
-  .btn-secondary:hover {
+@utility btn-secondary {
+  @apply btn text-gray-200;
+  background-color: #222233;
+  &:hover {
     background-color: rgb(34 34 51 / 0.8);
   }
+}
 
-  .btn-ghost {
-    @apply btn bg-transparent text-gray-300;
-  }
-
-  .btn-ghost:hover {
+@utility btn-ghost {
+  @apply btn bg-transparent text-gray-300;
+  &:hover {
     background-color: #222233;
   }
+}
 
-  .input {
-    @apply rounded-lg px-3 py-2 text-gray-100 placeholder-gray-500 transition-all duration-200;
-    background-color: #12121a;
-    border: 1px solid #222233;
-  }
-
-  .input:focus {
+@utility input {
+  @apply rounded-lg px-3 py-2 text-gray-100 placeholder-gray-500 transition-all duration-200;
+  background-color: #12121a;
+  border: 1px solid #222233;
+  &:focus {
     outline: none;
     border-color: #6e56cf;
     box-shadow: 0 0 0 1px #6e56cf;
   }
+}
 
-  .badge {
-    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
-  }
+@utility badge {
+  @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
+}
 
-  .badge-high {
-    @apply badge;
-    background-color: rgb(48 164 108 / 0.2);
-    color: #30a46c;
-  }
+@utility badge-high {
+  @apply badge;
+  background-color: rgb(48 164 108 / 0.2);
+  color: #30a46c;
+}
 
-  .badge-medium {
-    @apply badge;
-    background-color: rgb(245 166 35 / 0.2);
-    color: #f5a623;
-  }
+@utility badge-medium {
+  @apply badge;
+  background-color: rgb(245 166 35 / 0.2);
+  color: #f5a623;
+}
 
-  .badge-low {
-    @apply badge;
-    background-color: rgb(107 114 128 / 0.2);
-    color: #9ca3af;
-  }
+@utility badge-low {
+  @apply badge;
+  background-color: rgb(107 114 128 / 0.2);
+  color: #9ca3af;
+}
 
-  .badge-recommended {
-    @apply badge;
-    background-color: rgb(245 166 35 / 0.2);
-    color: #f5a623;
-  }
+@utility badge-recommended {
+  @apply badge;
+  background-color: rgb(245 166 35 / 0.2);
+  color: #f5a623;
+}
 
-  .skeleton {
-    @apply animate-pulse rounded;
-    background-color: #222233;
-  }
+@utility skeleton {
+  @apply animate-pulse rounded;
+  background-color: #222233;
 }

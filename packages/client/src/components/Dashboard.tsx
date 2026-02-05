@@ -23,12 +23,39 @@ export function Dashboard({ onStartSession }: DashboardProps) {
     onStartSession();
   };
 
+  const utils = trpc.useUtils();
+
   const handleResume = async (id: string) => {
     const session = sessionsQuery.data?.find((s) => s.id === id);
     if (!session) return;
+
     store.setSessionId(id);
     store.setDomain(session.domain);
     store.setStage(session.status as any);
+
+    // Fetch full session data and hydrate store
+    try {
+      const full = await utils.session.get.fetch({ id });
+      if (full.taxonomy?.tree) {
+        store.setTaxonomy(full.taxonomy.tree);
+        if (full.taxonomy.selectedPath) {
+          store.setSelectedPath(full.taxonomy.selectedPath);
+        }
+      }
+      if (full.methods) {
+        store.setMethodRecommendations(full.methods.recommended, full.methods.reasoning);
+        store.setSelectedMethods(full.methods.selected);
+      }
+      if (full.rubric) {
+        store.setRubric(full.rubric);
+      }
+      if (full.output?.package) {
+        store.setOutputPackage(full.output.package);
+      }
+    } catch {
+      // Session data fetch failed, continue with empty store
+    }
+
     onStartSession();
   };
 
