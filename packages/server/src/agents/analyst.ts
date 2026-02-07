@@ -20,7 +20,6 @@ interface RunOutputOptions {
   domain: string;
   coordinate: string;
   methods: Method[];
-  workerCount: number;
   ideas: Array<{
     id: string;
     name: string;
@@ -31,15 +30,16 @@ interface RunOutputOptions {
     data: string | null;
   }>;
   model: string;
+  signal?: AbortSignal;
 }
 
 export async function runOutput(options: RunOutputOptions): Promise<void> {
-  const { sessionId, domain, coordinate, methods, workerCount, ideas, model } = options;
+  const { sessionId, domain, coordinate, methods, ideas, model } = options;
   const db = getDb();
 
   sseManager.emit(sessionId, {
     type: 'agent:thought',
-    data: { agent: 'Analyst', text: 'Packaging final output...' },
+    data: { agent: 'Analyst', text: 'Packaging final output...', model },
   });
 
   // Gather data from ideas
@@ -68,13 +68,15 @@ export async function runOutput(options: RunOutputOptions): Promise<void> {
     {
       model,
       system: REPORTING_SKILL,
+      timeoutMs: 600_000,
+      signal: options.signal,
       prompt: `Package the final output for this ideation session.
 
 ## Session Info
 - Domain: "${domain}"
 - Coordinate: "${coordinate}"
 - Methods: ${methodNames.join(', ')}
-- Worker count: ${workerCount}
+- Methods used: ${methods.length}
 - Total ideas generated: ${divergeIdeas.length}
 - Total ideas survived to evolution: ${evolvedIdeas.length}
 
@@ -104,13 +106,15 @@ Return ONLY the JSON object matching the OutputPackage schema.`,
   // Generate visual artifacts
   sseManager.emit(sessionId, {
     type: 'agent:thought',
-    data: { agent: 'Analyst', text: 'Generating visual artifacts...' },
+    data: { agent: 'Analyst', text: 'Generating visual artifacts...', model },
   });
 
   const artifacts = await callLLMWithRetry(
     {
       model,
       system: REPORTING_SKILL,
+      timeoutMs: 600_000,
+      signal: options.signal,
       prompt: `Generate visual artifacts for the output package.
 
 ## Concepts
@@ -155,6 +159,6 @@ Return ONLY the JSON array.`,
 
   sseManager.emit(sessionId, {
     type: 'agent:thought',
-    data: { agent: 'Analyst', text: 'Output packaging complete.' },
+    data: { agent: 'Analyst', text: 'Output packaging complete.', model },
   });
 }

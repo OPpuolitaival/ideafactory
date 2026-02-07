@@ -7,6 +7,7 @@ type SSEListener = (event: SSEEvent) => void;
 const PERSISTABLE_TYPES = new Set([
   'agent:thought',
   'agent:tool_use',
+  'status:stage_start',
   'status:stage_complete',
   'status:error',
 ]);

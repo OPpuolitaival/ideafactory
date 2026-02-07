@@ -8,18 +8,24 @@ vi.mock('../agents/pipeline.js', () => ({
   runPipeline: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Mock the pipeline registry
+vi.mock('../agents/registry.js', () => ({
+  pipelineRegistry: {
+    abort: vi.fn(),
+    register: vi.fn(),
+    complete: vi.fn(),
+    isRunning: vi.fn().mockReturnValue(false),
+  },
+}));
+
 // Mock the config module to avoid filesystem access
 vi.mock('../config/index.js', () => ({
   getAllMethods: vi.fn(() => [
     { id: 1, name: 'First Principles', description: 'Break into functions', goodFor: 'Rethinking', builtIn: true },
     { id: 2, name: 'Biomimicry', description: 'Steal from nature', goodFor: 'Efficiency', builtIn: true },
   ]),
-  getAllPersonas: vi.fn(() => [
-    { name: 'The Engineer', systemPrompt: 'You are The Engineer.', defaultMethod: 'First Principles', builtIn: true },
-    { name: 'The Visionary', systemPrompt: 'You are The Visionary.', defaultMethod: 'Inversion', builtIn: true },
-  ]),
   loadConfig: vi.fn(() => ({
-    defaults: { workerCount: 3, ideasPerWorker: 15, webSearch: false },
+    defaults: { ideasPerWorker: 15, webSearch: false },
     models: {
       default: 'claude-sonnet-4-20250514',
       navigator: 'claude-haiku-4-20250414',
@@ -33,7 +39,8 @@ vi.mock('../config/index.js', () => ({
 
 import { appRouter } from './router.js';
 import { runPipeline } from '../agents/pipeline.js';
-import { getAllMethods, getAllPersonas, loadConfig } from '../config/index.js';
+import { pipelineRegistry } from '../agents/registry.js';
+import { getAllMethods, loadConfig } from '../config/index.js';
 
 // Helper to create a caller with a fresh test database
 function createCaller(db: TestDb) {
@@ -59,7 +66,7 @@ async function seedSession(
     domain: 'kitchen tools',
     status: 'taxonomy',
     coordinate: null,
-    config: JSON.stringify({ workerCount: 3, ideasPerWorker: 15, webSearch: false }),
+    config: JSON.stringify({ ideasPerWorker: 15, webSearch: false }),
     createdAt: now,
     updatedAt: now,
   };
@@ -108,13 +115,13 @@ describe('session router', () => {
         .where(eq(schema.sessions.id, result.sessionId));
 
       const config = JSON.parse(row.config!);
-      expect(config).toEqual({ workerCount: 3, ideasPerWorker: 15, webSearch: false });
+      expect(config).toEqual({ ideasPerWorker: 15, webSearch: false });
     });
 
     it('stores provided config', async () => {
       const result = await caller.session.start({
         domain: 'bicycles',
-        config: { workerCount: 5, ideasPerWorker: 20, webSearch: true },
+        config: { ideasPerWorker: 20, webSearch: true },
       });
       const [row] = await db
         .select()
@@ -122,7 +129,6 @@ describe('session router', () => {
         .where(eq(schema.sessions.id, result.sessionId));
 
       const config = JSON.parse(row.config!);
-      expect(config.workerCount).toBe(5);
       expect(config.ideasPerWorker).toBe(20);
       expect(config.webSearch).toBe(true);
     });
@@ -136,7 +142,7 @@ describe('session router', () => {
       };
       const result = await caller.session.start({
         domain: 'chairs',
-        config: { workerCount: 3, ideasPerWorker: 15, webSearch: false, models },
+        config: { ideasPerWorker: 15, webSearch: false, models },
       });
       const [row] = await db
         .select()
@@ -170,7 +176,7 @@ describe('session router', () => {
       expect(result.id).toBe('get-test');
       expect(result.domain).toBe(seeded.domain);
       expect(result.status).toBe('taxonomy');
-      expect(result.config).toEqual({ workerCount: 3, ideasPerWorker: 15, webSearch: false });
+      expect(result.config).toEqual({ ideasPerWorker: 15, webSearch: false });
       expect(result.taxonomy).toBeNull();
       expect(result.methods).toBeNull();
       expect(result.rubric).toBeNull();
@@ -202,7 +208,7 @@ describe('session router', () => {
       };
       await seedSession(db, {
         id: 'get-models',
-        config: JSON.stringify({ workerCount: 3, ideasPerWorker: 15, webSearch: false, models }),
+        config: JSON.stringify({ ideasPerWorker: 15, webSearch: false, models }),
       });
 
       const result = await caller.session.get({ id: 'get-models' });
@@ -259,7 +265,7 @@ describe('session router', () => {
       };
       await seedSession(db, {
         id: 'list-models',
-        config: JSON.stringify({ workerCount: 3, ideasPerWorker: 15, webSearch: false, models }),
+        config: JSON.stringify({ ideasPerWorker: 15, webSearch: false, models }),
       });
 
       const list = await caller.session.list();
@@ -633,7 +639,7 @@ describe('session router', () => {
         coordinate: 'A > B > C',
         createdAt: now,
         updatedAt: now,
-        config: JSON.stringify({ workerCount: 3, ideasPerWorker: 15, webSearch: false }),
+        config: JSON.stringify({ ideasPerWorker: 15, webSearch: false }),
       });
       await db.insert(schema.taxonomyTrees).values({
         sessionId: id,
@@ -893,6 +899,89 @@ describe('session router', () => {
       expect(outRows).toHaveLength(0);
     });
   });
+
+  // -------------------------------------------------------------------
+  // session.retry
+  // -------------------------------------------------------------------
+  describe('retry', () => {
+    it('aborts existing pipeline and re-fires for the current stage', async () => {
+      await seedSession(db, { id: 'retry-1', status: 'methods' });
+
+      const result = await caller.session.retry({ id: 'retry-1' });
+
+      expect(result).toEqual({ success: true });
+      expect(pipelineRegistry.abort).toHaveBeenCalledWith('retry-1');
+      expect(runPipeline).toHaveBeenCalledWith('retry-1', 'methods');
+    });
+
+    it('throws on a nonexistent session', async () => {
+      await expect(caller.session.retry({ id: 'nope' })).rejects.toThrow('Session not found');
+    });
+
+    it('throws when session is already completed', async () => {
+      await seedSession(db, { id: 'retry-done', status: 'completed' });
+
+      await expect(caller.session.retry({ id: 'retry-done' })).rejects.toThrow(
+        'Session already completed',
+      );
+    });
+
+    it('clears event log entries on retry', async () => {
+      await seedSession(db, { id: 'retry-log', status: 'rubric' });
+      // Add some event log entries
+      await db.insert(schema.eventLog).values([
+        {
+          sessionId: 'retry-log',
+          type: 'agent:thought',
+          data: JSON.stringify({ agent: 'navigator', text: 'Old thought' }),
+          createdAt: Date.now(),
+        },
+        {
+          sessionId: 'retry-log',
+          type: 'status:stage_start',
+          data: JSON.stringify({ stage: 'rubric' }),
+          createdAt: Date.now(),
+        },
+        {
+          sessionId: 'retry-log',
+          type: 'agent:thought',
+          data: JSON.stringify({ agent: 'strategist', text: 'Rubric thought' }),
+          createdAt: Date.now(),
+        },
+      ]);
+
+      await caller.session.retry({ id: 'retry-log' });
+
+      const events = await db
+        .select()
+        .from(schema.eventLog)
+        .where(eq(schema.eventLog.sessionId, 'retry-log'));
+
+      // Only the first event (before stage_start for rubric) should remain
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe('agent:thought');
+      const data = JSON.parse(events[0].data);
+      expect(data.text).toBe('Old thought');
+    });
+
+    it('clears all events when no stage_start is found', async () => {
+      await seedSession(db, { id: 'retry-nostart', status: 'taxonomy' });
+      await db.insert(schema.eventLog).values({
+        sessionId: 'retry-nostart',
+        type: 'agent:thought',
+        data: JSON.stringify({ agent: 'navigator', text: 'Some thought' }),
+        createdAt: Date.now(),
+      });
+
+      await caller.session.retry({ id: 'retry-nostart' });
+
+      const events = await db
+        .select()
+        .from(schema.eventLog)
+        .where(eq(schema.eventLog.sessionId, 'retry-nostart'));
+      expect(events).toHaveLength(0);
+    });
+  });
 });
 
 // -------------------------------------------------------------------
@@ -919,22 +1008,11 @@ describe('config router', () => {
     });
   });
 
-  describe('getPersonas', () => {
-    it('returns the persona array from config', async () => {
-      const result = await caller.config.getPersonas();
-
-      expect(result).toHaveLength(2);
-      expect(result[0]).toMatchObject({ name: 'The Engineer' });
-      expect(result[1]).toMatchObject({ name: 'The Visionary' });
-      expect(getAllPersonas).toHaveBeenCalled();
-    });
-  });
-
   describe('getConfig', () => {
     it('returns config with defaults, models, and server', async () => {
       const result = await caller.config.getConfig();
 
-      expect(result.defaults).toEqual({ workerCount: 3, ideasPerWorker: 15, webSearch: false });
+      expect(result.defaults).toEqual({ ideasPerWorker: 15, webSearch: false });
       expect(result.models).toBeDefined();
       expect(result.server).toEqual({ port: 3000 });
       expect(loadConfig).toHaveBeenCalled();

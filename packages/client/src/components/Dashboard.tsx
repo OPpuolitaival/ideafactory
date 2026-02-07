@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { trpc } from '../trpc/index.js';
 import { useSessionStore } from '../store/index.js';
 import { ModelSelector } from './ModelSelector.js';
@@ -18,13 +18,27 @@ export function Dashboard({ onStartSession }: DashboardProps) {
   const duplicateMutation = trpc.session.duplicate.useMutation();
   const store = useSessionStore();
 
-  const defaultModels = configQuery.data?.models;
   const [models, setModels] = useState({
-    navigator: defaultModels?.navigator ?? 'claude-opus-4-6',
-    strategist: defaultModels?.strategist ?? 'claude-opus-4-6',
-    worker: defaultModels?.worker ?? 'claude-opus-4-6',
-    analyst: defaultModels?.analyst ?? 'claude-opus-4-6',
+    navigator: 'claude-opus-4-6',
+    strategist: 'claude-opus-4-6',
+    worker: 'claude-opus-4-6',
+    analyst: 'claude-opus-4-6',
   });
+  const [modelsInitialized, setModelsInitialized] = useState(false);
+
+  // Sync model defaults from config.yaml once loaded
+  useEffect(() => {
+    if (configQuery.data?.models && !modelsInitialized) {
+      const cm = configQuery.data.models;
+      setModels({
+        navigator: cm.navigator ?? 'claude-opus-4-6',
+        strategist: cm.strategist ?? 'claude-opus-4-6',
+        worker: cm.worker ?? 'claude-opus-4-6',
+        analyst: cm.analyst ?? 'claude-opus-4-6',
+      });
+      setModelsInitialized(true);
+    }
+  }, [configQuery.data, modelsInitialized]);
 
   const handleStart = async () => {
     if (!domain.trim()) return;

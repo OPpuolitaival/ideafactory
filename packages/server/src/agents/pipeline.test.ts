@@ -51,12 +51,10 @@ vi.mock('./analyst.js', () => ({ runOutput: (...args: unknown[]) => mockRunOutpu
 // ---------------------------------------------------------------------------
 const mockLoadConfig = vi.fn();
 const mockGetAllMethods = vi.fn();
-const mockGetAllPersonas = vi.fn();
 
 vi.mock('../config/index.js', () => ({
   loadConfig: (...args: unknown[]) => mockLoadConfig(...args),
   getAllMethods: (...args: unknown[]) => mockGetAllMethods(...args),
-  getAllPersonas: (...args: unknown[]) => mockGetAllPersonas(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -64,7 +62,7 @@ vi.mock('../config/index.js', () => ({
 // ---------------------------------------------------------------------------
 
 const defaultConfig = {
-  defaults: { workerCount: 3, ideasPerWorker: 15, webSearch: false },
+  defaults: { ideasPerWorker: 15, webSearch: false },
   models: {
     default: 'claude-sonnet-4-20250514',
     navigator: 'claude-haiku-4-20250414',
@@ -79,14 +77,9 @@ const allMethods = [
   { id: 1, name: 'First Principles', description: 'd', goodFor: 'g', builtIn: true },
 ];
 
-const allPersonas = [
-  { name: 'The Engineer', systemPrompt: 'You are The Engineer.', defaultMethod: 'First Principles', builtIn: true },
-];
-
 function setupDefaultConfig() {
   mockLoadConfig.mockReturnValue(defaultConfig);
   mockGetAllMethods.mockReturnValue(allMethods);
-  mockGetAllPersonas.mockReturnValue(allPersonas);
 }
 
 async function insertSession(
@@ -101,7 +94,7 @@ async function insertSession(
     status: opts?.status ?? 'taxonomy',
     createdAt: Date.now(),
     updatedAt: Date.now(),
-    config: opts?.config ?? JSON.stringify({ workerCount: 3, ideasPerWorker: 15 }),
+    config: opts?.config ?? JSON.stringify({ ideasPerWorker: 15 }),
   });
 }
 
@@ -164,17 +157,21 @@ describe('Pipeline - runPipeline', () => {
   // -----------------------------------------------------------------------
   it('taxonomy stage calls runTaxonomy with correct args', async () => {
     const sid = 'sess-pipe-tax';
-    await insertSession(testDb, sid, { config: JSON.stringify({ workerCount: 3, ideasPerWorker: 15, webSearch: true }) });
+    await insertSession(testDb, sid, { config: JSON.stringify({ ideasPerWorker: 15, webSearch: true }) });
 
     await runPipeline(sid, 'taxonomy');
 
     expect(mockRunTaxonomy).toHaveBeenCalledTimes(1);
-    expect(mockRunTaxonomy).toHaveBeenCalledWith({
-      sessionId: sid,
-      domain: 'test domain',
-      webSearch: true,
-      model: 'claude-haiku-4-20250414',
-    });
+    expect(mockRunTaxonomy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: sid,
+        domain: 'test domain',
+        webSearch: true,
+        model: 'claude-haiku-4-20250414',
+      }),
+    );
+    // Verify signal is passed
+    expect(mockRunTaxonomy.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
   });
 
   // -----------------------------------------------------------------------
@@ -204,12 +201,15 @@ describe('Pipeline - runPipeline', () => {
     await runPipeline(sid, 'methods');
 
     expect(mockRunMethodSelection).toHaveBeenCalledTimes(1);
-    expect(mockRunMethodSelection).toHaveBeenCalledWith({
-      sessionId: sid,
-      coordinate: 'test > coordinate',
-      methods: allMethods,
-      model: 'claude-sonnet-4-20250514',
-    });
+    expect(mockRunMethodSelection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: sid,
+        coordinate: 'test > coordinate',
+        methods: allMethods,
+        model: 'claude-sonnet-4-20250514',
+      }),
+    );
+    expect(mockRunMethodSelection.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
   });
 
   // -----------------------------------------------------------------------
@@ -240,13 +240,16 @@ describe('Pipeline - runPipeline', () => {
     await runPipeline(sid, 'rubric');
 
     expect(mockRunRubricDesign).toHaveBeenCalledTimes(1);
-    expect(mockRunRubricDesign).toHaveBeenCalledWith({
-      sessionId: sid,
-      coordinate: 'test > coordinate',
-      domain: 'test domain',
-      methods: allMethods, // id 1 matches the allMethods fixture
-      model: 'claude-sonnet-4-20250514',
-    });
+    expect(mockRunRubricDesign).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: sid,
+        coordinate: 'test > coordinate',
+        domain: 'test domain',
+        methods: allMethods, // id 1 matches the allMethods fixture
+        model: 'claude-sonnet-4-20250514',
+      }),
+    );
+    expect(mockRunRubricDesign.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
   });
 
   // -----------------------------------------------------------------------
@@ -268,9 +271,7 @@ describe('Pipeline - runPipeline', () => {
     expect(factoryArgs.methods).toEqual(allMethods);
     expect(factoryArgs.rubric).toBeDefined();
     expect(factoryArgs.rubric.gates).toHaveLength(1);
-    expect(factoryArgs.workerCount).toBe(3);
     expect(factoryArgs.ideasPerWorker).toBe(15);
-    expect(factoryArgs.personas).toEqual(allPersonas);
     expect(factoryArgs.workerModel).toBe('claude-sonnet-4-20250514');
     expect(factoryArgs.analystModel).toBe('claude-sonnet-4-20250514');
   });
@@ -359,33 +360,44 @@ describe('Pipeline - runPipeline', () => {
   });
 
   // -----------------------------------------------------------------------
+  // 10. Abort: DOMException with AbortError name is silently ignored
+  // -----------------------------------------------------------------------
+  it('silently ignores AbortError without emitting status:error', async () => {
+    const sid = 'sess-pipe-abort';
+    await insertSession(testDb, sid);
+
+    // Agent throws DOMException (as callLLM does when external signal fires)
+    mockRunTaxonomy.mockRejectedValueOnce(new DOMException('Aborted', 'AbortError'));
+
+    await runPipeline(sid, 'taxonomy');
+
+    // Should NOT emit status:error
+    const errorEvents = mockEmit.mock.calls.filter(
+      ([sessionId, evt]: [string, { type: string }]) =>
+        sessionId === sid && evt.type === 'status:error',
+    );
+    expect(errorEvents).toHaveLength(0);
+
+    // Should NOT emit status:stage_complete either (stage was aborted, not completed)
+    const completeEvents = mockEmit.mock.calls.filter(
+      ([sessionId, evt]: [string, { type: string }]) =>
+        sessionId === sid && evt.type === 'status:stage_complete',
+    );
+    expect(completeEvents).toHaveLength(0);
+  });
+
+  // -----------------------------------------------------------------------
   // 12. Taxonomy stage reads webSearch from session config
   // -----------------------------------------------------------------------
   it('taxonomy stage reads webSearch=false from session config by default', async () => {
     const sid = 'sess-pipe-tax-ws';
-    await insertSession(testDb, sid, { config: JSON.stringify({ workerCount: 3, ideasPerWorker: 15 }) });
+    await insertSession(testDb, sid, { config: JSON.stringify({ ideasPerWorker: 15 }) });
 
     await runPipeline(sid, 'taxonomy');
 
     expect(mockRunTaxonomy).toHaveBeenCalledWith(
       expect.objectContaining({ webSearch: false }),
     );
-  });
-
-  // -----------------------------------------------------------------------
-  // 13. Factory stage: uses session-level workerCount override
-  // -----------------------------------------------------------------------
-  it('factory stage uses workerCount from session config', async () => {
-    const sid = 'sess-pipe-factory-wc';
-    await insertSession(testDb, sid, { config: JSON.stringify({ workerCount: 5, ideasPerWorker: 20 }) });
-    await insertMethodSelection(testDb, sid, [1]);
-    await insertRubric(testDb, sid);
-
-    await runPipeline(sid, 'factory');
-
-    const factoryArgs = mockRunFactory.mock.calls[0][0];
-    expect(factoryArgs.workerCount).toBe(5);
-    expect(factoryArgs.ideasPerWorker).toBe(20);
   });
 
   // -----------------------------------------------------------------------

@@ -11,9 +11,17 @@ function getModelColor(model?: string): string {
   return opt?.color ?? '#6e56cf';
 }
 
+const SSE_STATUS_CONFIG = {
+  connected: { color: 'bg-green-500', label: '' },
+  connecting: { color: 'bg-yellow-500 animate-pulse', label: 'Connecting...' },
+  reconnecting: { color: 'bg-yellow-500 animate-pulse', label: 'Reconnecting...' },
+  disconnected: { color: 'bg-red-500', label: 'Disconnected' },
+} as const;
+
 export function ThoughtFeed({ onClose }: ThoughtFeedProps) {
   const thoughts = useSessionStore((s) => s.thoughts);
   const stageModels = useSessionStore((s) => s.stageModels);
+  const sseStatus = useSessionStore((s) => s.sseStatus);
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoScroll = useRef(true);
 
@@ -32,7 +40,18 @@ export function ThoughtFeed({ onClose }: ThoughtFeedProps) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-4 py-3 border-b border-bg-3">
-        <h3 className="text-sm font-medium text-gray-300">Agent Thoughts</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-medium text-gray-300">Agent Thoughts</h3>
+          <span
+            className={`inline-block w-2 h-2 rounded-full ${SSE_STATUS_CONFIG[sseStatus].color}`}
+            title={sseStatus}
+          />
+          {SSE_STATUS_CONFIG[sseStatus].label && (
+            <span className="text-xs text-gray-500">
+              {SSE_STATUS_CONFIG[sseStatus].label}
+            </span>
+          )}
+        </div>
         <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-xs">
           Hide
         </button>

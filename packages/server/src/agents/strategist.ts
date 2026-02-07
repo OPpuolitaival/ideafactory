@@ -23,6 +23,7 @@ interface RunMethodSelectionOptions {
   coordinate: string;
   methods: Method[];
   model: string;
+  signal?: AbortSignal;
 }
 
 export async function runMethodSelection(options: RunMethodSelectionOptions): Promise<void> {
@@ -30,23 +31,43 @@ export async function runMethodSelection(options: RunMethodSelectionOptions): Pr
 
   sseManager.emit(sessionId, {
     type: 'agent:thought',
-    data: { agent: 'Strategist', text: `Analyzing coordinate "${coordinate}" for method selection...` },
+    data: { agent: 'Strategist', text: `Analyzing coordinate "${coordinate}" for method selection...`, model },
   });
 
   const methodList = methods
     .map((m) => `- ID ${m.id}: **${m.name}** — ${m.description}. Good for: ${m.goodFor}`)
     .join('\n');
 
+  const methodIds = methods.map((m) => m.id);
+
   const recommendation = await callLLMWithRetry(
     {
       model,
       system: METHOD_SELECTOR_SKILL,
+      timeoutMs: 120_000,
+      signal: options.signal,
       prompt: `The user has selected this coordinate in the taxonomy: "${coordinate}"
 
 Available methods:
 ${methodList}
 
-Recommend 3-5 methods and provide reasoning for each. Return ONLY the JSON object.`,
+Recommend 3-5 methods and provide reasoning for each.
+
+You MUST return a JSON object with exactly this structure:
+{
+  "recommended": [${methodIds.slice(0, 3).join(', ')}],
+  "reasoning": {
+    "${methodIds[0]}": "Why this method fits the coordinate...",
+    "${methodIds[1]}": "Why this method fits the coordinate...",
+    "${methodIds[2]}": "Why this method fits the coordinate..."
+  }
+}
+
+Field descriptions:
+- "recommended": an array of 3-5 method ID numbers (integers) from the list above
+- "reasoning": an object where each key is a method ID (as a string) and the value is a 1-2 sentence explanation
+
+Return ONLY the JSON object. No markdown, no code blocks, no extra text.`,
       outputSchema: methodRecommendationJsonSchema,
       sessionId,
       agentName: 'Strategist',
@@ -74,7 +95,7 @@ Recommend 3-5 methods and provide reasoning for each. Return ONLY the JSON objec
 
   sseManager.emit(sessionId, {
     type: 'agent:thought',
-    data: { agent: 'Strategist', text: 'Method recommendations ready.' },
+    data: { agent: 'Strategist', text: 'Method recommendations ready.', model },
   });
 }
 
@@ -84,6 +105,7 @@ interface RunRubricDesignOptions {
   domain: string;
   methods: Method[];
   model: string;
+  signal?: AbortSignal;
 }
 
 export async function runRubricDesign(options: RunRubricDesignOptions): Promise<void> {
@@ -91,7 +113,7 @@ export async function runRubricDesign(options: RunRubricDesignOptions): Promise<
 
   sseManager.emit(sessionId, {
     type: 'agent:thought',
-    data: { agent: 'Strategist', text: `Designing rubric for "${coordinate}"...` },
+    data: { agent: 'Strategist', text: `Designing rubric for "${coordinate}"...`, model },
   });
 
   const methodNames = methods.map((m) => m.name).join(', ');
@@ -100,6 +122,8 @@ export async function runRubricDesign(options: RunRubricDesignOptions): Promise<
     {
       model,
       system: RUBRIC_DESIGNER_SKILL,
+      timeoutMs: 120_000,
+      signal: options.signal,
       prompt: `Design an evaluation rubric for ideas in this problem space:
 
 Domain: "${domain}"
@@ -108,12 +132,27 @@ Selected Methods: ${methodNames}
 
 The rubric must be domain-aware but idea-agnostic (you're defining success BEFORE ideas are generated).
 
-Requirements:
-- 3-5 hard gates (binary pass/fail)
-- 5-8 scored criteria (weighted 1-5)
-- 3-5 verification tests
+You MUST return a JSON object with exactly this structure:
+{
+  "gates": [
+    { "id": "g1", "text": "Must be physically possible" },
+    { "id": "g2", "text": "Must not violate regulations" }
+  ],
+  "criteria": [
+    { "id": "c1", "text": "Feasibility", "weight": 4, "description": "1=impossible; 5=trivial to build" },
+    { "id": "c2", "text": "Novelty", "weight": 3, "description": "1=already exists; 5=never been done" }
+  ],
+  "tests": [
+    { "id": "t1", "text": "Build a prototype and test with 5 users" }
+  ]
+}
 
-Return ONLY the JSON object.`,
+Requirements:
+- "gates": array of 3-5 objects, each with "id" (string like "g1") and "text" (string)
+- "criteria": array of 5-8 objects, each with "id" (string like "c1"), "text" (string), "weight" (integer 1-5), and "description" (string explaining 1 vs 5)
+- "tests": array of 3-5 objects, each with "id" (string like "t1") and "text" (string)
+
+Return ONLY the JSON object. No markdown, no code blocks, no extra text.`,
       outputSchema: rubricJsonSchema,
       sessionId,
       agentName: 'Strategist',
@@ -139,6 +178,6 @@ Return ONLY the JSON object.`,
 
   sseManager.emit(sessionId, {
     type: 'agent:thought',
-    data: { agent: 'Strategist', text: 'Rubric design complete.' },
+    data: { agent: 'Strategist', text: 'Rubric design complete.', model },
   });
 }

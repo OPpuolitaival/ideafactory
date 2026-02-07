@@ -32,6 +32,8 @@ interface SessionState {
   stage: Stage;
   isLoading: boolean;
   error: string | null;
+  errorStage: string | null;
+  sseStatus: 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
   // Taxonomy
   taxonomy: TaxonomyNode | null;
@@ -47,6 +49,13 @@ interface SessionState {
 
   // Factory
   factoryPhase: 'idle' | 'diverge' | 'converge' | 'evolve' | 'qa' | 'complete';
+  factoryProgress: {
+    detail: string;
+    workersTotal?: number;
+    workersDone?: number;
+    workersFailed?: number;
+  } | null;
+  factoryStartedAt: number | null;
   workerIdeas: Map<string, RawIdea[]>;
   scoredIdeas: ScoredIdea[];
   evolvedIdeas: ScoredIdea[];
@@ -68,6 +77,7 @@ interface SessionState {
   setStage: (stage: Stage) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
+  setSseStatus: (status: SessionState['sseStatus']) => void;
   setTaxonomy: (tree: TaxonomyNode) => void;
   setSelectedPath: (path: string[]) => void;
   setMethodRecommendations: (recommended: number[], reasoning: Record<string, string>) => void;
@@ -94,6 +104,8 @@ const initialState = {
   stage: 'taxonomy' as Stage,
   isLoading: false,
   error: null,
+  errorStage: null as string | null,
+  sseStatus: 'disconnected' as const,
   taxonomy: null,
   selectedPath: [] as string[],
   recommendedMethods: [] as number[],
@@ -101,6 +113,8 @@ const initialState = {
   selectedMethods: [] as number[],
   rubric: null,
   factoryPhase: 'idle' as const,
+  factoryProgress: null as { detail: string; workersTotal?: number; workersDone?: number; workersFailed?: number } | null,
+  factoryStartedAt: null as number | null,
   workerIdeas: new Map<string, RawIdea[]>(),
   scoredIdeas: [] as ScoredIdea[],
   evolvedIdeas: [] as ScoredIdea[],
@@ -119,6 +133,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   setStage: (stage) => set({ stage }),
   setLoading: (isLoading) => set({ isLoading }),
   setError: (error) => set({ error }),
+  setSseStatus: (sseStatus) => set({ sseStatus }),
   setTaxonomy: (taxonomy) => set({ taxonomy }),
   setSelectedPath: (selectedPath) => set({ selectedPath }),
 
@@ -184,6 +199,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       stage: targetStage,
       isLoading: false,
       error: null,
+      errorStage: null,
       thoughts: [],
     };
 
@@ -203,6 +219,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
     if (stageIdx < STAGE_ORDER.indexOf('factory')) {
       updates.factoryPhase = 'idle';
+      updates.factoryProgress = null;
+      updates.factoryStartedAt = null;
       updates.workerIdeas = new Map();
       updates.scoredIdeas = [];
       updates.evolvedIdeas = [];
@@ -314,6 +332,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         } else if (entry.type === 'agent:tool_use') {
           store.addThought(entry.data.agent, `Using tool: ${entry.data.tool}`, entry.data.model);
           if (entry.data.model) lastModel = entry.data.model;
+        } else if (entry.type === 'status:stage_start') {
+          store.addThought('system', `Starting ${entry.data.stage} stage...`);
         } else if (entry.type === 'status:stage_complete') {
           if (lastModel) {
             hydratedStageModels[entry.data.stage] = lastModel;
@@ -353,14 +373,18 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       case 'data:convergence_result':
         set({
           factoryPhase: 'converge',
+          factoryProgress: null,
           scoredIdeas: [...event.data.survivors, ...event.data.eliminated],
         });
         break;
       case 'data:evolution_result':
-        set({ factoryPhase: 'evolve', evolvedIdeas: event.data.evolved });
+        set({ factoryPhase: 'evolve', factoryProgress: null, evolvedIdeas: event.data.evolved });
         break;
       case 'data:qa_result':
-        set({ factoryPhase: 'qa', qaResults: event.data.reviewed });
+        set({ factoryPhase: 'qa', factoryProgress: null, qaResults: event.data.reviewed });
+        break;
+      case 'factory:progress':
+        set({ factoryProgress: event.data });
         break;
       case 'data:output_package':
         set({ outputPackage: event.data });
@@ -376,11 +400,30 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         store.addStageCheckpoint(event.data.stage as Stage);
         break;
       }
+      case 'status:stage_start':
+        set({
+          isLoading: true,
+          error: null,
+          errorStage: null,
+          ...(event.data.stage === 'factory' ? { factoryStartedAt: Date.now(), factoryProgress: null } : {}),
+        });
+        store.addThought('system', `Starting ${event.data.stage} stage...`);
+        break;
       case 'status:error':
-        set({ error: event.data.error, isLoading: false });
+        set({ error: event.data.error, errorStage: event.data.stage, isLoading: false, factoryProgress: null, factoryStartedAt: null, factoryPhase: 'idle' });
         break;
     }
   },
 
-  reset: () => set({ ...initialState, thoughts: [], stageModels: {}, sessionModels: null }),
+  reset: () =>
+    set({
+      ...initialState,
+      thoughts: [],
+      stageModels: {},
+      sessionModels: null,
+      errorStage: null,
+      sseStatus: 'disconnected',
+      factoryProgress: null,
+      factoryStartedAt: null,
+    }),
 }));

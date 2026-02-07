@@ -31,15 +31,12 @@ vi.mock('../sse/index.js', () => ({
 
 vi.mock('../config/index.js', () => ({
   loadConfig: () => ({
-    defaults: { workerCount: 3, ideasPerWorker: 15, webSearch: false },
+    defaults: { ideasPerWorker: 15, webSearch: false },
     models: { default: 'model', navigator: 'model', strategist: 'model', worker: 'model', analyst: 'model' },
     server: { port: 3000 },
   }),
   getAllMethods: () => [
     { id: 1, name: 'First Principles', description: 'd', goodFor: 'g', builtIn: true },
-  ],
-  getAllPersonas: () => [
-    { name: 'Engineer', systemPrompt: 'test', defaultMethod: 'First Principles', builtIn: true },
   ],
 }));
 
@@ -103,7 +100,7 @@ async function seedSession(overrides: Partial<{
     status: 'taxonomy',
     createdAt: now,
     updatedAt: now,
-    config: JSON.stringify({ workerCount: 3, ideasPerWorker: 15, webSearch: false }),
+    config: JSON.stringify({ ideasPerWorker: 15, webSearch: false }),
   };
   await testDb.insert(schema.sessions).values({ ...defaults, ...overrides });
 }
@@ -140,7 +137,7 @@ async function seedCompletedSession() {
         domain: 'Test',
         coordinate: 'Test > A',
         methods: ['M1'],
-        workerCount: 1,
+        methodCount: 1,
         totalIdeasGenerated: 5,
         totalIdeasSurvived: 2,
         duration: 1000,
@@ -546,13 +543,13 @@ describe('cmdConfig', () => {
     await runCommand('config', ['show']);
 
     const parsed = JSON.parse(consoleOutput.join(''));
-    expect(parsed.defaults).toEqual({ workerCount: 3, ideasPerWorker: 15, webSearch: false });
+    expect(parsed.defaults).toEqual({ ideasPerWorker: 15, webSearch: false });
     expect(parsed.models).toBeDefined();
     expect(parsed.server).toEqual({ port: 3000 });
   });
 
   it('prints message for unsupported config keys', async () => {
-    await runCommand('config', ['set', 'workerCount', '5']);
+    await runCommand('config', ['set', 'timeout', '30']);
 
     expect(consoleErrors.some((e) => e.includes('not yet implemented'))).toBe(true);
   });

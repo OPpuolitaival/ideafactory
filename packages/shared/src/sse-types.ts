@@ -22,5 +22,16 @@ export type SSEEvent =
   | { type: 'data:evolution_result'; data: { evolved: ScoredIdea[] } }
   | { type: 'data:qa_result'; data: { reviewed: QAResult[] } }
   | { type: 'data:output_package'; data: OutputPackage }
+  | {
+      type: 'factory:progress';
+      data: {
+        phase: 'diverge' | 'converge' | 'evolve' | 'qa' | 'rescore';
+        detail: string;
+        workersTotal?: number;
+        workersDone?: number;
+        workersFailed?: number;
+      };
+    }
+  | { type: 'status:stage_start'; data: { stage: string } }
   | { type: 'status:stage_complete'; data: { stage: string; next: string } }
   | { type: 'status:error'; data: { stage: string; error: string } };

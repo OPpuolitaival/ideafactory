@@ -47,7 +47,6 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
             <div>
               <label className="block text-sm font-medium mb-2">Current Defaults</label>
               <div className="bg-bg-1 rounded-lg p-3 text-sm font-mono text-gray-400 space-y-1">
-                <p>Workers: {configQuery.data.defaults.workerCount}</p>
                 <p>Ideas/worker: {configQuery.data.defaults.ideasPerWorker}</p>
                 <p>Web search: {configQuery.data.defaults.webSearch ? 'on' : 'off'}</p>
                 <p>Default model: {configQuery.data.models.default}</p>

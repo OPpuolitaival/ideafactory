@@ -61,7 +61,7 @@ taxonomy → methods → rubric → factory → output → completed
 | Factory | Workers + Analyst | claude-sonnet-4 | 0.5–0.9 | `agents/factory.ts` |
 | Output | Analyst | claude-sonnet-4 | 0.4 | `agents/analyst.ts` |
 
-The Factory stage has four sequential sub-phases: **Diverge** (N parallel workers with distinct personas, temp=0.9) → **Converge** (score/gate/merge, temp=0.5) → **Evolve** (refine survivors, temp=0.7) → **QA** (feasibility/risk, temp=0.5).
+The Factory stage has sequential sub-phases: **Diverge** (one worker per selected method, on-the-fly personas from method fields, temp=0.9) → **Converge** (batched scoring in groups of 5, gate filtering + top-N selection, temp=0.5) → **Evolve** (pair-based cross-pollination with re-scoring, temp=0.7) → **QA** (feasibility/risk, temp=0.5).
 
 ### Agent System
 
@@ -84,9 +84,9 @@ The Factory stage has four sequential sub-phases: **Diverge** (N parallel worker
 ### Configuration
 
 - `ANTHROPIC_API_KEY` env var or `~/.ideafactory/config.yaml` (`apiKey` field)
-- Config supports: `defaults.workerCount` (1-5), `defaults.ideasPerWorker` (5-30), `models.*` per agent role, `server.port`
+- Config supports: `defaults.ideasPerWorker` (5-30), `defaults.webSearch` (bool), `models.*` per agent role, `server.port`
 - Custom methods: YAML/JSON in `~/.ideafactory/methods/`
-- Custom personas: YAML/JSON in `~/.ideafactory/personas/`
+- Worker count is determined by the number of selected methods (one worker per method)
 
 ## Code Style
 

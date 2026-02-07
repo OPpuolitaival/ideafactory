@@ -58,7 +58,7 @@ function insertSession(db: TestDb, id: string, opts?: { status?: string; coordin
     status: opts?.status ?? 'output',
     createdAt: Date.now(),
     updatedAt: Date.now(),
-    config: opts?.config ?? JSON.stringify({ workerCount: 2, ideasPerWorker: 15 }),
+    config: opts?.config ?? JSON.stringify({ ideasPerWorker: 15 }),
   });
 }
 
@@ -110,7 +110,7 @@ const outputPackage = {
     domain: 'Test Domain',
     coordinate: 'Test > Coord',
     methods: ['First Principles'],
-    workerCount: 2,
+    methodCount: 1,
     totalIdeasGenerated: 6,
     totalIdeasSurvived: 2,
     duration: 30000,
@@ -133,7 +133,6 @@ function makeBaseOptions(sessionId: string) {
     domain: 'Test Domain',
     coordinate: 'Test > Coord',
     methods,
-    workerCount: 2,
     ideas: [
       { id: 'i1', name: 'Idea 1', description: 'Desc 1', phase: 'diverge', score: null, eliminated: null, data: null },
       { id: 'i2', name: 'Idea 2', description: 'Desc 2', phase: 'diverge', score: null, eliminated: null, data: null },

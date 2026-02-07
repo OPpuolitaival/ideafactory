@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 import { getDb, schema } from '../db/index.js';
-import { loadConfig, getAllMethods, getAllPersonas } from '../config/index.js';
+import { loadConfig, getAllMethods } from '../config/index.js';
 import { runPipeline } from '../agents/pipeline.js';
 import { sseManager } from '../sse/index.js';
 import { nanoid } from 'nanoid';
@@ -59,7 +59,6 @@ async function cmdRun(args: string[]): Promise<void> {
       domain: { type: 'string' },
       coordinate: { type: 'string' },
       methods: { type: 'string' },
-      workers: { type: 'string' },
       output: { type: 'string', default: 'text' },
       'web-search': { type: 'boolean', default: false },
       'auto-accept-rubric': { type: 'boolean', default: false },
@@ -83,10 +82,8 @@ async function cmdRun(args: string[]): Promise<void> {
   const db = getDb();
   const sessionId = nanoid(12);
   const now = Date.now();
-  const workerCount = values.workers ? parseInt(values.workers as string, 10) : config.defaults.workerCount;
 
   const sessionConfig = {
-    workerCount,
     ideasPerWorker: config.defaults.ideasPerWorker,
     webSearch: values['web-search'] as boolean,
   };
@@ -314,7 +311,7 @@ async function cmdStage(args: string[]): Promise<void> {
         status: 'taxonomy',
         createdAt: now,
         updatedAt: now,
-        config: JSON.stringify({ workerCount: 3, ideasPerWorker: 15, webSearch: args.includes('--web-search') }),
+        config: JSON.stringify({ ideasPerWorker: 15, webSearch: args.includes('--web-search') }),
       });
 
       await runPipeline(sessionId, 'taxonomy');

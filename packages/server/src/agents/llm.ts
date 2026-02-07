@@ -9,21 +9,109 @@ export interface LLMCallOptions {
   sessionId?: string;
   agentName?: string;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 const AGENT_TIMEOUT_MS = 300_000;
 
-function isRateLimitError(error: unknown): boolean {
-  if (error instanceof Error && error.message.includes('429')) return true;
-  if (error instanceof Error && error.message.toLowerCase().includes('rate limit')) return true;
-  return false;
+/**
+ * Extract an HTTP status code from an error message (including SDK stderr).
+ * Returns the status code number, or null if none found.
+ */
+function extractHttpStatus(error: unknown): number | null {
+  if (!(error instanceof Error)) return null;
+  const msg = error.message;
+
+  // Match patterns like "404", "HTTP 404", "status 404", "error 404",
+  // "404 Not Found", "returned 404", "status_code: 404"
+  const patterns = [
+    /\b(?:HTTP|status|error|returned|status_code:?)\s*(\d{3})\b/i,
+    /\b(\d{3})\s+(?:Not Found|Bad Request|Forbidden|Unauthorized|Internal Server|Bad Gateway|Service Unavailable|Gateway Timeout|Too Many Requests|Overloaded)/i,
+    /\berror\b.*?\b(4\d{2}|5\d{2})\b/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = msg.match(pattern);
+    if (match) {
+      const code = parseInt(match[1], 10);
+      if (code >= 400 && code <= 599) return code;
+    }
+  }
+
+  return null;
 }
 
-function isAuthError(error: unknown): boolean {
-  if (error instanceof Error && error.message.includes('401')) return true;
-  if (error instanceof Error && error.message.toLowerCase().includes('authentication')) return true;
-  if (error instanceof Error && error.message.toLowerCase().includes('unauthorized')) return true;
-  return false;
+/**
+ * Classify an error into a category for retry logic.
+ */
+type ErrorClass = 'auth' | 'rate_limit' | 'api_client' | 'api_server' | 'overloaded' | 'process_crash' | 'timeout' | 'parse';
+
+function classifyError(error: unknown): ErrorClass {
+  if (!(error instanceof Error)) return 'parse';
+  const msg = error.message.toLowerCase();
+
+  // Timeout (AbortError is caught separately in callLLM, but check the message too)
+  if (msg.includes('timed out') || error.name === 'AbortError') return 'timeout';
+
+  // Check for HTTP status codes first (most specific)
+  const status = extractHttpStatus(error);
+  if (status !== null) {
+    if (status === 401) return 'auth';
+    if (status === 429) return 'rate_limit';
+    if (status === 529 || status === 503) return 'overloaded';
+    if (status >= 400 && status < 500) return 'api_client';
+    if (status >= 500) return 'api_server';
+  }
+
+  // Keyword-based fallbacks for when status code isn't in the message
+  if (msg.includes('401') || msg.includes('unauthorized') || msg.includes('authentication')) return 'auth';
+  if (msg.includes('429') || msg.includes('rate limit')) return 'rate_limit';
+  if (msg.includes('overloaded') || msg.includes('529')) return 'overloaded';
+  if (msg.includes('not_found') || msg.includes('not found') || msg.includes('404')) return 'api_client';
+  if (msg.includes('invalid_request') || msg.includes('bad request') || msg.includes('400')) return 'api_client';
+  if (msg.includes('forbidden') || msg.includes('403')) return 'api_client';
+  if (msg.includes('500') || msg.includes('internal server') || msg.includes('502') || msg.includes('bad gateway')) return 'api_server';
+
+  // Process crashes (SDK subprocess died)
+  if (
+    msg.includes('exited with code') ||
+    msg.includes('process exited') ||
+    msg.includes('spawn') ||
+    msg.includes('enoent') ||
+    msg.includes('killed')
+  ) return 'process_crash';
+
+  return 'parse';
+}
+
+/**
+ * Format a user-friendly error message for API/HTTP errors.
+ */
+function formatAPIError(error: Error, errorClass: ErrorClass, model: string): string {
+  const status = extractHttpStatus(error);
+  const statusStr = status ? ` (HTTP ${status})` : '';
+
+  switch (errorClass) {
+    case 'auth':
+      return `Authentication failed${statusStr}. Ensure ANTHROPIC_API_KEY is set or run within Claude Code.`;
+    case 'rate_limit':
+      return `Rate limited${statusStr}. Will retry with backoff.`;
+    case 'overloaded':
+      return `API is overloaded${statusStr}. Will retry with backoff.`;
+    case 'api_client': {
+      // Extract the most meaningful part of the error
+      const firstLine = error.message.split('\n')[0];
+      if (status === 404)
+        return `Model "${model}" not found${statusStr}. Check that the model ID is valid.`;
+      if (status === 400)
+        return `Bad request to API${statusStr}: ${firstLine}`;
+      return `API error${statusStr}: ${firstLine}`;
+    }
+    case 'api_server':
+      return `API server error${statusStr}. Will retry.`;
+    default:
+      return error.message;
+  }
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -55,7 +143,32 @@ export async function callLLM(options: LLMCallOptions): Promise<string> {
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = setTimeout(() => {
+    controller.abort(
+      new Error(
+        `${agentName ?? 'Agent'} timed out after ${Math.round(timeoutMs / 1000)}s. ` +
+          `Try retrying or using a faster model (e.g. Haiku).`,
+      ),
+    );
+  }, timeoutMs);
+
+  // Link external abort signal to internal controller
+  if (options.signal) {
+    if (options.signal.aborted) {
+      controller.abort(options.signal.reason);
+    } else {
+      const onAbort = () => controller.abort(options.signal!.reason);
+      options.signal.addEventListener('abort', onAbort, { once: true });
+      controller.signal.addEventListener(
+        'abort',
+        () => options.signal!.removeEventListener('abort', onAbort),
+        { once: true },
+      );
+    }
+  }
+
+  // Capture subprocess stderr to surface meaningful error details
+  const stderrChunks: string[] = [];
 
   try {
     const stream = query({
@@ -71,6 +184,9 @@ export async function callLLM(options: LLMCallOptions): Promise<string> {
         allowDangerouslySkipPermissions: true,
         abortController: controller,
         includePartialMessages: true,
+        stderr: (data: string) => {
+          stderrChunks.push(data);
+        },
         ...(outputSchema
           ? { outputFormat: { type: 'json_schema' as const, schema: outputSchema } }
           : {}),
@@ -142,22 +258,153 @@ export async function callLLM(options: LLMCallOptions): Promise<string> {
     }
 
     return resultText;
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      // If the external signal triggered the abort, preserve AbortError so
+      // pipeline.ts can silently ignore cancelled runs (e.g. retry replacing old run)
+      if (options.signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+      }
+
+      // Otherwise it was an internal timeout
+      const reason = controller.signal.reason;
+      const timeoutMsg =
+        reason instanceof Error
+          ? reason.message
+          : `${agentName ?? 'Agent'} timed out after ${Math.round(timeoutMs / 1000)}s.`;
+      throw new Error(timeoutMsg);
+    }
+
+    // Enrich process crash errors with captured stderr
+    const stderr = stderrChunks.join('').trim();
+    if (stderr && error instanceof Error) {
+      // Extract the most useful lines from stderr (skip noise)
+      const usefulLines = stderr
+        .split('\n')
+        .filter((l) => l.trim() && !l.includes('[DEBUG]'))
+        .slice(-10)
+        .join('\n');
+      if (usefulLines) {
+        console.error(`[${agentName ?? 'Agent'}] SDK stderr:\n${usefulLines}`);
+        error.message += `\nSDK stderr: ${usefulLines.slice(0, 500)}`;
+      }
+    }
+
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
 }
 
+/**
+ * Attempt to repair common JSON issues (trailing commas, single quotes, etc.)
+ */
+function repairJSON(text: string): string {
+  let s = text;
+  // Remove trailing commas before } or ]
+  s = s.replace(/,\s*([\]}])/g, '$1');
+  // Replace single-quoted strings with double-quoted (simple heuristic)
+  // Only if the string doesn't already contain double quotes
+  if (!s.includes('"') && s.includes("'")) {
+    s = s.replace(/'/g, '"');
+  }
+  return s;
+}
+
+/**
+ * Try to parse a string as JSON, with repair fallback.
+ */
+function tryParseJSON(text: string): unknown | null {
+  try {
+    return JSON.parse(text);
+  } catch {
+    try {
+      return JSON.parse(repairJSON(text));
+    } catch {
+      return null;
+    }
+  }
+}
+
 export function extractJSON(text: string): string {
-  // Try to find JSON in code blocks first
-  const codeBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-  if (codeBlockMatch) {
-    return codeBlockMatch[1].trim();
+  // 1. Try the whole string as-is
+  if (tryParseJSON(text) !== null) {
+    // Still might need repair for downstream parsing
+    try {
+      JSON.parse(text);
+      return text.trim();
+    } catch {
+      return repairJSON(text).trim();
+    }
   }
 
-  // Try to find raw JSON (object or array)
+  // 2. Try to find JSON in code blocks
+  const codeBlockRegex = /```(?:json)?\s*\n?([\s\S]*?)\n?```/g;
+  let match;
+  while ((match = codeBlockRegex.exec(text)) !== null) {
+    const candidate = match[1].trim();
+    if (tryParseJSON(candidate) !== null) {
+      try {
+        JSON.parse(candidate);
+        return candidate;
+      } catch {
+        return repairJSON(candidate);
+      }
+    }
+  }
+
+  // 3. Try to find JSON objects/arrays using bracket matching
+  //    Find the outermost { ... } or [ ... ] by scanning for balanced brackets
+  for (const opener of ['{', '['] as const) {
+    const closer = opener === '{' ? '}' : ']';
+    const startIdx = text.indexOf(opener);
+    if (startIdx === -1) continue;
+
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let i = startIdx; i < text.length; i++) {
+      const ch = text[i];
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === '\\' && inString) {
+        escape = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (ch === opener) depth++;
+      if (ch === closer) depth--;
+      if (depth === 0) {
+        const candidate = text.slice(startIdx, i + 1);
+        if (tryParseJSON(candidate) !== null) {
+          try {
+            JSON.parse(candidate);
+            return candidate;
+          } catch {
+            return repairJSON(candidate);
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  // 4. Last resort: simple regex (greedy)
   const jsonMatch = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
   if (jsonMatch) {
-    return jsonMatch[1].trim();
+    const candidate = jsonMatch[1].trim();
+    // Try repair even if it doesn't parse cleanly
+    const repaired = repairJSON(candidate);
+    if (tryParseJSON(repaired) !== null) {
+      return repaired;
+    }
+    return candidate;
   }
 
   return text.trim();
@@ -169,55 +416,129 @@ export async function callLLMWithRetry<T>(
   maxRetries = 2,
 ): Promise<T> {
   let lastError: Error | null = null;
+  let rateLimitRetries = 0;
+  const MAX_RATE_LIMIT_RETRIES = 10;
+  // Clone options so we can mutate prompt/outputSchema for retries without affecting the caller
+  const retryOptions = { ...options, prompt: options.prompt };
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const text = await callLLM(options);
+      const text = await callLLM(retryOptions);
       const jsonStr = extractJSON(text);
       return parse(jsonStr);
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
+      const errorClass = classifyError(lastError);
 
-      // Authentication errors should not be retried
-      if (isAuthError(error)) {
+      // Log every failed attempt with full context
+      console.error(
+        `[${options.agentName ?? 'Agent'}] Attempt ${attempt + 1}/${maxRetries + 1} failed` +
+          ` [${errorClass}] (model: ${retryOptions.model}, outputSchema: ${retryOptions.outputSchema ? 'yes' : 'no'}):`,
+        lastError.message,
+      );
+
+      // ── Non-retryable errors: throw immediately ──
+
+      if (errorClass === 'auth') {
+        const msg = formatAPIError(lastError, errorClass, retryOptions.model);
         if (options.sessionId) {
           sseManager.emit(options.sessionId, {
             type: 'status:error',
+            data: { stage: 'auth', error: msg },
+          });
+        }
+        throw new Error(msg);
+      }
+
+      if (errorClass === 'api_client') {
+        // 4xx errors (404, 400, 403) are not fixable by retrying — wrong model, bad request, etc.
+        const msg = formatAPIError(lastError, errorClass, retryOptions.model);
+        if (options.sessionId) {
+          sseManager.emit(options.sessionId, {
+            type: 'status:error',
+            data: { stage: options.agentName ?? 'unknown', error: msg },
+          });
+        }
+        throw new Error(msg);
+      }
+
+      if (errorClass === 'timeout') {
+        if (attempt >= maxRetries) break;
+        const currentTimeout = retryOptions.timeoutMs ?? AGENT_TIMEOUT_MS;
+        retryOptions.timeoutMs = Math.round(currentTimeout * 1.5);
+        if (options.sessionId && options.agentName) {
+          sseManager.emit(options.sessionId, {
+            type: 'agent:thought',
             data: {
-              stage: 'auth',
-              error:
-                'Authentication failed. Ensure ANTHROPIC_API_KEY is set or run within Claude Code.',
+              agent: options.agentName,
+              text: `Timed out after ${Math.round(currentTimeout / 1000)}s. Retrying with ${Math.round(retryOptions.timeoutMs / 1000)}s timeout...`,
+              model: options.model,
             },
           });
         }
-        throw new Error(
-          'Authentication failed. Ensure ANTHROPIC_API_KEY is set or run within Claude Code.',
-        );
+        continue;
       }
 
-      // Rate limit errors get exponential backoff with jitter
-      if (isRateLimitError(error)) {
+      // ── Retryable errors ──
+
+      if (attempt >= maxRetries) break; // exhausted retries
+
+      if (errorClass === 'rate_limit' || errorClass === 'overloaded') {
+        rateLimitRetries++;
+        if (rateLimitRetries > MAX_RATE_LIMIT_RETRIES) break;
+        const waitMs = backoffWithJitter(attempt);
+        const label = errorClass === 'rate_limit' ? 'Rate limited' : 'API overloaded';
+        if (options.sessionId && options.agentName) {
+          sseManager.emit(options.sessionId, {
+            type: 'agent:thought',
+            data: {
+              agent: options.agentName,
+              text: `${label}, waiting ${Math.round(waitMs / 1000)}s before retry...`,
+              model: options.model,
+            },
+          });
+        }
+        await sleep(waitMs);
+        // Don't count rate limit / overloaded retries against the parse-retry budget
+        if (attempt > 0) attempt--;
+        continue;
+      }
+
+      if (errorClass === 'api_server') {
+        // 5xx errors — retry with backoff, but don't modify the prompt
         const waitMs = backoffWithJitter(attempt);
         if (options.sessionId && options.agentName) {
           sseManager.emit(options.sessionId, {
             type: 'agent:thought',
             data: {
               agent: options.agentName,
-              text: `Rate limited, waiting ${Math.round(waitMs / 1000)}s before retry...`,
+              text: `API server error, retrying in ${Math.round(waitMs / 1000)}s (attempt ${attempt + 2}/${maxRetries + 1})...`,
               model: options.model,
             },
           });
         }
         await sleep(waitMs);
-        // Don't count rate limit retries against the parse-retry budget
-        if (attempt > 0) attempt--;
         continue;
       }
 
-      if (attempt < maxRetries) {
-        // Backoff before retrying network/parse errors
-        await sleep(backoffWithJitter(attempt, 500));
+      // Backoff before retrying process crashes / parse errors
+      await sleep(backoffWithJitter(attempt, 500));
 
+      if (errorClass === 'process_crash' && retryOptions.outputSchema) {
+        // SDK subprocess crashed — drop outputSchema and retry in text mode
+        delete retryOptions.outputSchema;
+        if (options.sessionId && options.agentName) {
+          sseManager.emit(options.sessionId, {
+            type: 'agent:thought',
+            data: {
+              agent: options.agentName,
+              text: `Structured output failed, retrying with text mode (attempt ${attempt + 2}/${maxRetries + 1})...`,
+              model: options.model,
+            },
+          });
+        }
+      } else {
+        // Parse error — append JSON fix instruction
         if (options.sessionId && options.agentName) {
           sseManager.emit(options.sessionId, {
             type: 'agent:thought',
@@ -228,12 +549,20 @@ export async function callLLMWithRetry<T>(
             },
           });
         }
-
-        // Add explicit "fix your JSON" instruction on retry
-        options.prompt += `\n\nIMPORTANT: Your previous response had a JSON formatting error: ${lastError.message}. Please return ONLY valid JSON matching the required schema. No additional text before or after the JSON.`;
+        // Strip any SDK stderr from the error message to keep the prompt clean
+        const cleanError = lastError.message.split('\nSDK stderr:')[0];
+        retryOptions.prompt += `\n\nIMPORTANT: Your previous response had an error: ${cleanError}. Please return ONLY valid JSON matching the required schema. No markdown, no code blocks, no explanatory text — just the JSON object/array.`;
       }
     }
   }
 
-  throw new Error(`Failed after ${maxRetries + 1} attempts: ${lastError?.message}`);
+  // Format the final error message based on error class
+  const finalClass = lastError ? classifyError(lastError) : 'parse';
+  const finalMsg = lastError
+    ? finalClass !== 'parse'
+      ? formatAPIError(lastError, finalClass, retryOptions.model)
+      : lastError.message
+    : 'Unknown error';
+
+  throw new Error(`Failed after ${maxRetries + 1} attempts: ${finalMsg}`);
 }

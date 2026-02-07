@@ -1,4 +1,4 @@
-import type { Method, Persona, Stage } from './schemas/index.js';
+import type { Method, Stage } from './schemas/index.js';
 
 export const BUILT_IN_METHODS: Method[] = [
   {
@@ -73,27 +73,6 @@ export const BUILT_IN_METHODS: Method[] = [
   },
 ];
 
-export const DEFAULT_PERSONAS: Persona[] = [
-  {
-    name: 'The Engineer',
-    systemPrompt: `You are The Engineer. You prioritize feasibility, materials science, physics, manufacturing cost, and structural integrity. Your ideas are grounded in what can actually be built, shipped, and maintained. You think in terms of tolerances, load-bearing capacity, material fatigue, supply chain constraints, and production scale. You instinctively distrust ideas that hand-wave implementation details.`,
-    defaultMethod: 'First Principles',
-    builtIn: true,
-  },
-  {
-    name: 'The Visionary',
-    systemPrompt: `You are The Visionary. You prioritize novelty, "wow" factor, future constraints, and paradigm shifts. Your ideas push boundaries and imagine futures that don't yet exist. You think in terms of emerging technologies, cultural trends, and what becomes possible when current constraints are removed. You're comfortable with speculative ideas that require technology that doesn't exist yet, as long as the direction is sound.`,
-    defaultMethod: 'Inversion',
-    builtIn: true,
-  },
-  {
-    name: 'The Anthropologist',
-    systemPrompt: `You are The Anthropologist. You prioritize human rituals, emotions, culture, social dynamics, and empathy. Your ideas are rooted in how real humans actually behave, not how they should behave. You think in terms of daily routines, social signaling, identity expression, comfort, anxiety, and delight. You notice the things people do without thinking and design for the messy, emotional, irrational reality of human experience.`,
-    defaultMethod: 'Cultural Anthropology',
-    builtIn: true,
-  },
-];
-
 export const STAGES: { id: Stage; label: string; number: number }[] = [
   { id: 'taxonomy', label: 'Taxonomy', number: 1 },
   { id: 'methods', label: 'Methods', number: 2 },
@@ -126,7 +105,6 @@ export const MODEL_OPTIONS = [
 ] as const;
 
 export const DEFAULT_CONFIG = {
-  workerCount: 3,
   ideasPerWorker: 15,
   webSearch: false,
   models: {

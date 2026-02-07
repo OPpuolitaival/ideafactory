@@ -2,17 +2,27 @@ import type { Stage } from '@ideafactory/shared';
 import { sseManager } from '../sse/index.js';
 import { getDb, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
-import { loadConfig, getAllMethods, getAllPersonas } from '../config/index.js';
+import { loadConfig, getAllMethods } from '../config/index.js';
 import { runTaxonomy } from './navigator.js';
 import { runMethodSelection, runRubricDesign } from './strategist.js';
 import { runFactory } from './factory.js';
 import { runOutput } from './analyst.js';
+import { pipelineRegistry } from './registry.js';
 
 export async function runPipeline(sessionId: string, stage: Stage): Promise<void> {
+  const controller = pipelineRegistry.register(sessionId);
   const db = getDb();
   const config = loadConfig();
 
   try {
+    sseManager.emit(sessionId, {
+      type: 'status:stage_start',
+      data: { stage },
+    });
+
+    // Check abort between setup and stage execution
+    if (controller.signal.aborted) return;
+
     switch (stage) {
       case 'taxonomy': {
         const [session] = await db
@@ -28,6 +38,7 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
           domain: session.domain,
           webSearch: sessionConfig.webSearch ?? false,
           model: sessionConfig.models?.navigator ?? config.models.navigator,
+          signal: controller.signal,
         });
 
         sseManager.emit(sessionId, {
@@ -51,6 +62,7 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
           coordinate: session.coordinate ?? '',
           methods: getAllMethods(),
           model: sessionConfig.models?.strategist ?? config.models.strategist,
+          signal: controller.signal,
         });
 
         sseManager.emit(sessionId, {
@@ -86,6 +98,7 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
           domain: session.domain,
           methods: selectedMethods,
           model: sessionConfig.models?.strategist ?? config.models.strategist,
+          signal: controller.signal,
         });
 
         sseManager.emit(sessionId, {
@@ -120,10 +133,7 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
         const allMethods = getAllMethods();
         const selectedMethods = allMethods.filter((m) => selectedMethodIds.includes(m.id));
         const rubric = rubricRow ? JSON.parse(rubricRow.rubric) : null;
-        const workerCount = sessionConfig.workerCount ?? config.defaults.workerCount;
         const ideasPerWorker = sessionConfig.ideasPerWorker ?? config.defaults.ideasPerWorker;
-
-        const personas = getAllPersonas();
 
         await runFactory({
           sessionId,
@@ -131,11 +141,10 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
           coordinate: session.coordinate ?? '',
           methods: selectedMethods,
           rubric,
-          workerCount,
           ideasPerWorker,
-          personas,
           workerModel: sessionConfig.models?.worker ?? config.models.worker,
           analystModel: sessionConfig.models?.analyst ?? config.models.analyst,
+          signal: controller.signal,
         });
 
         sseManager.emit(sessionId, {
@@ -175,9 +184,9 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
           domain: session.domain,
           coordinate: session.coordinate ?? '',
           methods: selectedMethods,
-          workerCount: sessionConfig.workerCount ?? config.defaults.workerCount,
           ideas: ideaRows,
           model: sessionConfig.models?.analyst ?? config.models.analyst,
+          signal: controller.signal,
         });
 
         // Mark session completed
@@ -194,11 +203,25 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
       }
     }
   } catch (error) {
+    // Silently ignore aborted pipelines (e.g. from retry replacing the old run)
+    if (error instanceof Error && error.name === 'AbortError') return;
+
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error(`Pipeline error [${stage}]:`, error);
     sseManager.emit(sessionId, {
       type: 'status:error',
       data: { stage, error: message },
     });
+    // Update DB so session doesn't appear stuck on refresh
+    try {
+      await db
+        .update(schema.sessions)
+        .set({ updatedAt: Date.now() })
+        .where(eq(schema.sessions.id, sessionId));
+    } catch {
+      // DB update is best-effort
+    }
+  } finally {
+    pipelineRegistry.complete(sessionId);
   }
 }

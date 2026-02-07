@@ -59,7 +59,7 @@ function insertSession(db: TestDb, id: string, domain = 'test domain') {
     status: 'taxonomy',
     createdAt: Date.now(),
     updatedAt: Date.now(),
-    config: JSON.stringify({ workerCount: 3, ideasPerWorker: 15 }),
+    config: JSON.stringify({ ideasPerWorker: 15 }),
   });
 }
 
@@ -108,6 +108,36 @@ describe('extractJSON', () => {
   it('prefers code block over raw JSON when both present', () => {
     const input = '{"outer":true}\n```json\n{"inner":true}\n```';
     expect(JSON.parse(extractJSON(input))).toEqual({ inner: true });
+  });
+
+  it('extracts JSON with surrounding prose text', () => {
+    const input = 'Here is my recommendation:\n\n{"recommended":[1,4,7],"reasoning":{"1":"reason A","4":"reason B","7":"reason C"}}\n\nI hope this helps!';
+    expect(JSON.parse(extractJSON(input))).toEqual({
+      recommended: [1, 4, 7],
+      reasoning: { '1': 'reason A', '4': 'reason B', '7': 'reason C' },
+    });
+  });
+
+  it('repairs trailing commas in JSON', () => {
+    const input = '{"name":"test","items":[1,2,3,],}';
+    expect(JSON.parse(extractJSON(input))).toEqual({ name: 'test', items: [1, 2, 3] });
+  });
+
+  it('handles JSON with nested braces in string values', () => {
+    const input = 'Result: {"text":"value with {braces} inside","count":5} end';
+    expect(JSON.parse(extractJSON(input))).toEqual({ text: 'value with {braces} inside', count: 5 });
+  });
+
+  it('extracts complex nested JSON from prose', () => {
+    const input = `I've analyzed the coordinate. Here are my recommendations:
+
+{"gates":[{"id":"g1","text":"Must be feasible"}],"criteria":[{"id":"c1","text":"Novelty","weight":3,"description":"1=old; 5=new"}],"tests":[{"id":"t1","text":"User test"}]}
+
+Let me know if you need changes.`;
+    const parsed = JSON.parse(extractJSON(input));
+    expect(parsed.gates[0].id).toBe('g1');
+    expect(parsed.criteria[0].weight).toBe(3);
+    expect(parsed.tests[0].id).toBe('t1');
   });
 });
 
@@ -288,6 +318,293 @@ describe('callLLMWithRetry', () => {
         evt.data.text.includes('Rate limited'),
     );
     expect(rateLimitEvents.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('breaks out of retry loop after MAX_RATE_LIMIT_RETRIES consecutive 429 errors', async () => {
+    const rateLimitError = new Error('429 Too Many Requests');
+    // Return 429 every time — should cap at 10 rate-limit retries then fail
+    mockQuery.mockImplementation(() => { throw rateLimitError; });
+
+    await expect(
+      callLLMWithRetry(
+        {
+          model: 'claude-sonnet-4-20250514',
+          system: 'sys',
+          prompt: 'p',
+          sessionId: 'sess-rate-cap',
+          agentName: 'RateCap',
+        },
+        (text) => JSON.parse(text),
+        2, // 2 parse retries, but rate-limit retries are separate
+      ),
+    ).rejects.toThrow(/Failed after/);
+
+    // Should not loop forever — calls should be capped
+    // With maxRetries=2 and MAX_RATE_LIMIT_RETRIES=10, at most ~12 total calls
+    expect(mockQuery.mock.calls.length).toBeLessThanOrEqual(15);
+    expect(mockQuery.mock.calls.length).toBeGreaterThan(3);
+  }, 30_000);
+
+  it('drops outputSchema and retries in text mode after process crash', async () => {
+    const crashError = new Error('Claude Code process exited with code 1');
+    mockQuery
+      .mockImplementationOnce(() => { throw crashError; })
+      .mockReturnValueOnce(queryResult('{"recommended":[1,4],"reasoning":{"1":"good","4":"also good"}}'));
+
+    const result = await callLLMWithRetry(
+      {
+        model: 'claude-haiku-4-5-20251001',
+        system: 'sys',
+        prompt: 'p',
+        outputSchema: { type: 'object', properties: { recommended: { type: 'array' } } },
+        sessionId: 'sess-crash',
+        agentName: 'CrashAgent',
+      },
+      (text) => JSON.parse(text),
+      2,
+    );
+
+    expect(result).toEqual({ recommended: [1, 4], reasoning: { '1': 'good', '4': 'also good' } });
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+
+    // Second call should NOT have outputFormat (structured output dropped)
+    const secondCallOpts = mockQuery.mock.calls[1][0].options;
+    expect(secondCallOpts.outputFormat).toBeUndefined();
+
+    // Should emit a "text mode" retry thought
+    const textModeEvents = mockEmit.mock.calls.filter(
+      ([sid, evt]: [string, { type: string; data: { text: string } }]) =>
+        sid === 'sess-crash' &&
+        evt.type === 'agent:thought' &&
+        evt.data.text.includes('text mode'),
+    );
+    expect(textModeEvents.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('retries timeout once with 1.5x timeout before failing', async () => {
+    const timeoutError1 = new Error('SlowAgent timed out after 60s. Try retrying or using a faster model (e.g. Haiku).');
+    timeoutError1.name = 'AbortError';
+    const timeoutError2 = new Error('SlowAgent timed out after 90s. Try retrying or using a faster model (e.g. Haiku).');
+    timeoutError2.name = 'AbortError';
+    mockQuery
+      .mockImplementationOnce(() => { throw timeoutError1; })
+      .mockImplementationOnce(() => { throw timeoutError2; });
+
+    await expect(
+      callLLMWithRetry(
+        {
+          model: 'claude-sonnet-4-20250514',
+          system: 'sys',
+          prompt: 'p',
+          sessionId: 'sess-timeout',
+          agentName: 'SlowAgent',
+          timeoutMs: 60_000,
+        },
+        (text) => JSON.parse(text),
+        1, // 1 retry allowed
+      ),
+    ).rejects.toThrow(/Failed after 2 attempts/);
+
+    // Should have been called twice (first attempt + one retry)
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+
+    // Should emit a timeout retry thought event
+    const retryEvents = mockEmit.mock.calls.filter(
+      ([sid, evt]: [string, { type: string; data: { text: string } }]) =>
+        sid === 'sess-timeout' &&
+        evt.type === 'agent:thought' &&
+        evt.data.text.includes('Timed out after 60s'),
+    );
+    expect(retryEvents.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('timeout succeeds on retry with extended timeout', async () => {
+    const timeoutError = new Error('SlowAgent timed out after 60s. Try retrying or using a faster model (e.g. Haiku).');
+    timeoutError.name = 'AbortError';
+    mockQuery
+      .mockImplementationOnce(() => { throw timeoutError; })
+      .mockReturnValueOnce(queryResult('{"ok":true}'));
+
+    const result = await callLLMWithRetry(
+      {
+        model: 'claude-sonnet-4-20250514',
+        system: 'sys',
+        prompt: 'p',
+        sessionId: 'sess-timeout-ok',
+        agentName: 'SlowAgent',
+        timeoutMs: 60_000,
+      },
+      (text) => JSON.parse(text),
+      1,
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it('timeout throws immediately when no retries are allowed', async () => {
+    const timeoutError = new Error('SlowAgent timed out after 1s. Try retrying or using a faster model (e.g. Haiku).');
+    timeoutError.name = 'AbortError';
+    mockQuery.mockImplementationOnce(() => { throw timeoutError; });
+
+    await expect(
+      callLLMWithRetry(
+        {
+          model: 'claude-sonnet-4-20250514',
+          system: 'sys',
+          prompt: 'p',
+          sessionId: 'sess-timeout-0',
+          agentName: 'SlowAgent',
+          timeoutMs: 1000,
+        },
+        (text) => JSON.parse(text),
+        0, // no retries
+      ),
+    ).rejects.toThrow(/Failed after 1 attempt/);
+
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws immediately on 404 API error without retrying', async () => {
+    const notFoundError = new Error('Claude Code process exited with code 1\nSDK stderr: error 404 Not Found');
+    mockQuery.mockImplementationOnce(() => { throw notFoundError; });
+
+    await expect(
+      callLLMWithRetry(
+        {
+          model: 'claude-haiku-4-5-20251001',
+          system: 'sys',
+          prompt: 'p',
+          sessionId: 'sess-404',
+          agentName: 'NotFound',
+        },
+        (text) => JSON.parse(text),
+        2,
+      ),
+    ).rejects.toThrow(/not found/i);
+
+    // Should only have been called once (no retries for 4xx)
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws immediately on 400 Bad Request without retrying', async () => {
+    const badReqError = new Error('400 Bad Request: invalid model parameter');
+    mockQuery.mockImplementationOnce(() => { throw badReqError; });
+
+    await expect(
+      callLLMWithRetry(
+        {
+          model: 'invalid-model',
+          system: 'sys',
+          prompt: 'p',
+          sessionId: 'sess-400',
+          agentName: 'BadReq',
+        },
+        (text) => JSON.parse(text),
+        2,
+      ),
+    ).rejects.toThrow(/Bad request.*400|API error.*400/i);
+
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('emits status:error SSE event on 404 API error', async () => {
+    const notFoundError = new Error('error 404 Not Found: model not available');
+    mockQuery.mockImplementationOnce(() => { throw notFoundError; });
+
+    await callLLMWithRetry(
+      {
+        model: 'nonexistent-model',
+        system: 'sys',
+        prompt: 'p',
+        sessionId: 'sess-404-sse',
+        agentName: 'NotFoundSSE',
+      },
+      (text) => JSON.parse(text),
+    ).catch(() => {});
+
+    const errorEvents = mockEmit.mock.calls.filter(
+      ([sid, evt]: [string, { type: string }]) =>
+        sid === 'sess-404-sse' && evt.type === 'status:error',
+    );
+    expect(errorEvents.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('retries on 500 server error with backoff', async () => {
+    const serverError = new Error('500 Internal Server Error');
+    mockQuery
+      .mockImplementationOnce(() => { throw serverError; })
+      .mockReturnValueOnce(queryResult('{"ok":true}'));
+
+    const result = await callLLMWithRetry(
+      {
+        model: 'claude-sonnet-4-20250514',
+        system: 'sys',
+        prompt: 'p',
+        sessionId: 'sess-500',
+        agentName: 'ServerErr',
+      },
+      (text) => JSON.parse(text),
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+
+    // Should emit a server error retry thought
+    const serverErrEvents = mockEmit.mock.calls.filter(
+      ([sid, evt]: [string, { type: string; data: { text: string } }]) =>
+        sid === 'sess-500' &&
+        evt.type === 'agent:thought' &&
+        evt.data.text.includes('API server error'),
+    );
+    expect(serverErrEvents.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('retries on 529 overloaded error with backoff', async () => {
+    const overloadedError = new Error('529 Overloaded');
+    mockQuery
+      .mockImplementationOnce(() => { throw overloadedError; })
+      .mockReturnValueOnce(queryResult('{"ok":true}'));
+
+    const result = await callLLMWithRetry(
+      {
+        model: 'claude-sonnet-4-20250514',
+        system: 'sys',
+        prompt: 'p',
+        sessionId: 'sess-529',
+        agentName: 'OverloadAgent',
+      },
+      (text) => JSON.parse(text),
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it('detects HTTP error embedded in SDK stderr', async () => {
+    // Simulates what actually happens: process exits with code 1, stderr has the real error
+    const error = new Error(
+      'Claude Code process exited with code 1\n' +
+      'SDK stderr: Error: 404 Not Found {"type":"error","error":{"type":"not_found_error","message":"model: claude-haiku-999 is not available"}}'
+    );
+    mockQuery.mockImplementationOnce(() => { throw error; });
+
+    await expect(
+      callLLMWithRetry(
+        {
+          model: 'claude-haiku-999',
+          system: 'sys',
+          prompt: 'p',
+          sessionId: 'sess-stderr',
+          agentName: 'StderrTest',
+        },
+        (text) => JSON.parse(text),
+        2,
+      ),
+    ).rejects.toThrow(/not found/i);
+
+    // Should NOT retry — 404 is a client error
+    expect(mockQuery).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -727,6 +1044,68 @@ describe('callLLM', () => {
         timeoutMs: 50,
       }),
     ).rejects.toThrow(/aborted/i);
+  });
+
+  it('aborts when external signal is already aborted — throws DOMException with AbortError name', async () => {
+    const controller = new AbortController();
+    controller.abort(new Error('Pipeline cancelled'));
+
+    mockQuery.mockImplementationOnce(({ options }: { options: { abortController: AbortController } }) => ({
+      [Symbol.asyncIterator]: async function* () {
+        // External signal should have already propagated to the internal controller
+        if (options.abortController.signal.aborted) {
+          const err = new Error('Request was aborted.');
+          err.name = 'AbortError';
+          throw err;
+        }
+        yield { type: 'result', result: 'should not reach here' };
+      },
+    }));
+
+    try {
+      await callLLM({
+        model: 'model',
+        system: 'sys',
+        prompt: 'p',
+        signal: controller.signal,
+      });
+      expect.fail('should have thrown');
+    } catch (err: any) {
+      expect(err.name).toBe('AbortError');
+      expect(err).toBeInstanceOf(DOMException);
+    }
+  });
+
+  it('aborts when external signal fires during request — throws DOMException with AbortError name', async () => {
+    const controller = new AbortController();
+
+    mockQuery.mockImplementationOnce(({ options }: { options: { abortController: AbortController } }) => ({
+      [Symbol.asyncIterator]: async function* () {
+        // Simulate the external abort happening during the request
+        await new Promise((_resolve, reject) => {
+          options.abortController.signal.addEventListener('abort', () => {
+            const err = new Error('Request was aborted.');
+            err.name = 'AbortError';
+            reject(err);
+          });
+          // Trigger external abort after a short delay
+          setTimeout(() => controller.abort(new Error('Pipeline cancelled')), 10);
+        });
+      },
+    }));
+
+    try {
+      await callLLM({
+        model: 'model',
+        system: 'sys',
+        prompt: 'p',
+        signal: controller.signal,
+      });
+      expect.fail('should have thrown');
+    } catch (err: any) {
+      expect(err.name).toBe('AbortError');
+      expect(err).toBeInstanceOf(DOMException);
+    }
   });
 });
 

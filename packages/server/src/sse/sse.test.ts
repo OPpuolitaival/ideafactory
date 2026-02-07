@@ -192,7 +192,7 @@ const outputPackageEvent: SSEEvent = {
       domain: 'Marine Technology',
       coordinate: 'Sustainable propulsion',
       methods: ['SCAMPER'],
-      workerCount: 3,
+      methodCount: 3,
       totalIdeasGenerated: 15,
       totalIdeasSurvived: 3,
       duration: 120000,

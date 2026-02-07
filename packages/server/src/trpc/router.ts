@@ -5,8 +5,9 @@ import { router, publicProcedure } from './trpc.js';
 import { schema } from '../db/index.js';
 import { RubricSchema, SessionConfigSchema, STAGE_ORDER } from '@ideafactory/shared';
 import type { Stage } from '@ideafactory/shared';
-import { getAllMethods, getAllPersonas, loadConfig } from '../config/index.js';
+import { getAllMethods, loadConfig } from '../config/index.js';
 import { runPipeline } from '../agents/pipeline.js';
+import { pipelineRegistry } from '../agents/registry.js';
 
 const sessionRouter = router({
   start: publicProcedure
@@ -20,7 +21,6 @@ const sessionRouter = router({
       const id = nanoid(12);
       const now = Date.now();
       const config = input.config ?? {
-        workerCount: 3,
         ideasPerWorker: 15,
         webSearch: false,
       };
@@ -397,15 +397,100 @@ const sessionRouter = router({
 
       return { success: true };
     }),
+
+  retry: publicProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const [session] = await ctx.db
+        .select()
+        .from(schema.sessions)
+        .where(eq(schema.sessions.id, input.id));
+
+      if (!session) throw new Error('Session not found');
+
+      const stage = session.status as Stage;
+      if (stage === 'completed') throw new Error('Session already completed');
+
+      // Abort any running pipeline for this session
+      pipelineRegistry.abort(input.id);
+
+      // Wait briefly to let the aborted pipeline's in-flight operations settle
+      await new Promise((r) => setTimeout(r, 200));
+
+      // Clean up data for the current stage before retrying.
+      // This prevents UNIQUE constraint errors on re-insert.
+      if (stage === 'taxonomy') {
+        await ctx.db
+          .delete(schema.taxonomyTrees)
+          .where(eq(schema.taxonomyTrees.sessionId, input.id));
+      } else if (stage === 'methods') {
+        await ctx.db
+          .delete(schema.methodSelections)
+          .where(eq(schema.methodSelections.sessionId, input.id));
+      } else if (stage === 'rubric') {
+        await ctx.db
+          .delete(schema.rubrics)
+          .where(eq(schema.rubrics.sessionId, input.id));
+      } else if (stage === 'factory') {
+        await ctx.db
+          .delete(schema.ideas)
+          .where(eq(schema.ideas.sessionId, input.id));
+      } else if (stage === 'output') {
+        await ctx.db
+          .delete(schema.outputPackages)
+          .where(eq(schema.outputPackages.sessionId, input.id));
+      }
+
+      // Clear event log for this stage (preserve prior stage events)
+      const eventLogRows = await ctx.db
+        .select()
+        .from(schema.eventLog)
+        .where(eq(schema.eventLog.sessionId, input.id))
+        .orderBy(schema.eventLog.id);
+
+      let cutoffId: number | null = null;
+      for (const row of eventLogRows) {
+        const data = JSON.parse(row.data);
+        if (row.type === 'status:stage_start' && data.stage === stage) {
+          cutoffId = row.id;
+        }
+      }
+
+      if (cutoffId !== null) {
+        // Delete all events from the stage_start onwards
+        await ctx.db.delete(schema.eventLog).where(
+          eq(schema.eventLog.sessionId, input.id),
+        );
+        // Re-insert events before the cutoff
+        for (const row of eventLogRows) {
+          if (row.id < cutoffId) {
+            await ctx.db.insert(schema.eventLog).values({
+              sessionId: row.sessionId,
+              type: row.type,
+              data: row.data,
+              createdAt: row.createdAt,
+            });
+          }
+        }
+      } else {
+        // No stage_start found — clear all events for safety
+        await ctx.db
+          .delete(schema.eventLog)
+          .where(eq(schema.eventLog.sessionId, input.id));
+      }
+
+      // Re-fire the pipeline
+      runPipeline(input.id, stage).catch((err) => {
+        console.error(`Pipeline retry error for session ${input.id}:`, err);
+      });
+
+      return { success: true };
+    }),
 });
 
 const configRouter = router({
   getMethods: publicProcedure.query(() => {
     return getAllMethods();
-  }),
-
-  getPersonas: publicProcedure.query(() => {
-    return getAllPersonas();
   }),
 
   getConfig: publicProcedure.query(() => {

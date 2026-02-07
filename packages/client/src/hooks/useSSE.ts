@@ -4,13 +4,22 @@ import type { SSEEvent } from '@ideafactory/shared';
 
 export function useSSE(sessionId: string | null) {
   const handleSSEEvent = useSessionStore((s) => s.handleSSEEvent);
+  const setSseStatus = useSessionStore((s) => s.setSseStatus);
   const eventSourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      setSseStatus('disconnected');
+      return;
+    }
 
+    setSseStatus('connecting');
     const es = new EventSource(`/api/session/${sessionId}/stream`);
     eventSourceRef.current = es;
+
+    es.onopen = () => {
+      setSseStatus('connected');
+    };
 
     const eventTypes = [
       'agent:thought',
@@ -23,6 +32,8 @@ export function useSSE(sessionId: string | null) {
       'data:evolution_result',
       'data:qa_result',
       'data:output_package',
+      'factory:progress',
+      'status:stage_start',
       'status:stage_complete',
       'status:error',
     ];
@@ -39,13 +50,18 @@ export function useSSE(sessionId: string | null) {
     }
 
     es.onerror = () => {
-      // EventSource auto-reconnects, but log for debugging
-      console.warn('SSE connection error, will auto-reconnect');
+      // EventSource auto-reconnects when readyState is CONNECTING
+      if (es.readyState === EventSource.CONNECTING) {
+        setSseStatus('reconnecting');
+      } else {
+        setSseStatus('disconnected');
+      }
     };
 
     return () => {
       es.close();
       eventSourceRef.current = null;
+      setSseStatus('disconnected');
     };
-  }, [sessionId, handleSSEEvent]);
+  }, [sessionId, handleSSEEvent, setSseStatus]);
 }

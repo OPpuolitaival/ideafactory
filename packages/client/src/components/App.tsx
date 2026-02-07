@@ -13,6 +13,7 @@ import { FactoryStage } from './stages/FactoryStage.js';
 import { OutputStage } from './stages/OutputStage.js';
 import { SettingsDialog } from './SettingsDialog.js';
 import { RollbackModal } from './RollbackModal.js';
+import { ErrorBanner } from './ErrorBanner.js';
 import type { Stage } from '@ideafactory/shared';
 
 type RollbackStage = Exclude<Stage, 'completed'>;
@@ -45,8 +46,6 @@ export function App() {
     setRollbackTarget(null);
     await rollbackMutation.mutateAsync({ id: sessionId, toStage: targetStage });
     useSessionStore.getState().clearDownstreamState(targetStage);
-    const full = await utils.session.get.fetch({ id: sessionId });
-    useSessionStore.getState().hydrateFromSession(full);
   };
 
   const handleDuplicateAndRollback = async (targetStage: RollbackStage) => {
@@ -97,6 +96,7 @@ export function App() {
         onSessionsClick={handleBackToDashboard}
       />
       <StageBar onStageClick={(s) => setRollbackTarget(s as RollbackStage)} />
+      <ErrorBanner />
       <div className="flex-1 flex overflow-hidden">
         <main className="flex-1 overflow-y-auto p-6">{stageComponent}</main>
         {thoughtsOpen && (

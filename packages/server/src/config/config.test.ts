@@ -44,7 +44,7 @@ function makeTmpDir(): string {
 }
 
 // ---------------------------------------------------------------------------
-// 2-9. Config loading / saving / methods / personas
+// 2-9. Config loading / saving / methods
 // ---------------------------------------------------------------------------
 
 describe('config module', () => {
@@ -89,14 +89,13 @@ describe('config module', () => {
   });
 
   // -----------------------------------------------------------------------
-  // loadConfig – default config when no file
+  // loadConfig -- default config when no file
   // -----------------------------------------------------------------------
 
   describe('loadConfig', () => {
     it('returns default config when no config file exists', () => {
       const cfg = configModule.loadConfig();
 
-      expect(cfg.defaults.workerCount).toBe(3);
       expect(cfg.defaults.ideasPerWorker).toBe(15);
       expect(cfg.defaults.webSearch).toBe(false);
       expect(cfg.server.port).toBe(3000);
@@ -108,7 +107,6 @@ describe('config module', () => {
     it('reads valid config.yaml correctly', () => {
       const yamlContent = YAML.stringify({
         defaults: {
-          workerCount: 5,
           ideasPerWorker: 25,
           webSearch: true,
         },
@@ -119,7 +117,6 @@ describe('config module', () => {
 
       const cfg = configModule.loadConfig();
 
-      expect(cfg.defaults.workerCount).toBe(5);
       expect(cfg.defaults.ideasPerWorker).toBe(25);
       expect(cfg.defaults.webSearch).toBe(true);
       expect(cfg.server.port).toBe(8080);
@@ -134,15 +131,15 @@ describe('config module', () => {
       const cfg = configModule.loadConfig();
 
       // Should fall back to defaults
-      expect(cfg.defaults.workerCount).toBe(3);
+      expect(cfg.defaults.ideasPerWorker).toBe(15);
       expect(warnSpy).toHaveBeenCalled();
 
       warnSpy.mockRestore();
     });
 
-    it('handles YAML that violates schema (e.g. workerCount out of range)', () => {
+    it('handles YAML that violates schema (e.g. ideasPerWorker out of range)', () => {
       const yamlContent = YAML.stringify({
-        defaults: { workerCount: 999 },
+        defaults: { ideasPerWorker: 999 },
       });
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
       fs.writeFileSync(configPath, yamlContent);
@@ -151,7 +148,7 @@ describe('config module', () => {
 
       const cfg = configModule.loadConfig();
 
-      expect(cfg.defaults.workerCount).toBe(3); // fallback
+      expect(cfg.defaults.ideasPerWorker).toBe(15); // fallback
       expect(warnSpy).toHaveBeenCalled();
 
       warnSpy.mockRestore();
@@ -179,10 +176,6 @@ describe('config module', () => {
   // -----------------------------------------------------------------------
 
   describe('default config values', () => {
-    it('workerCount defaults to 3', () => {
-      expect(configModule.loadConfig().defaults.workerCount).toBe(3);
-    });
-
     it('ideasPerWorker defaults to 15', () => {
       expect(configModule.loadConfig().defaults.ideasPerWorker).toBe(15);
     });
@@ -301,7 +294,7 @@ describe('config module', () => {
 
       const methods = configModule.loadUserMethods();
       expect(methods).toHaveLength(0);
-      // The file is silently skipped (no name → doesn't pass the `if` check),
+      // The file is silently skipped (no name -> doesn't pass the `if` check),
       // so no warning is emitted in this case. The warn is only for parse errors.
       warnSpy.mockRestore();
     });
@@ -326,98 +319,6 @@ describe('config module', () => {
 
       const methods = configModule.loadUserMethods();
       expect(methods).toHaveLength(0);
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // Custom personas loading
-  // -----------------------------------------------------------------------
-
-  describe('loadUserPersonas', () => {
-    it('returns empty array when personas dir does not exist', () => {
-      const personas = configModule.loadUserPersonas();
-      expect(personas).toEqual([]);
-    });
-
-    it('loads a valid YAML persona file', () => {
-      fs.mkdirSync(personasDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(personasDir, 'designer.yaml'),
-        YAML.stringify({
-          name: 'The Designer',
-          systemPrompt: 'You are a designer.',
-          defaultMethod: 'Biomimicry',
-        }),
-      );
-
-      const personas = configModule.loadUserPersonas();
-      expect(personas).toHaveLength(1);
-      expect(personas[0]).toEqual({
-        name: 'The Designer',
-        systemPrompt: 'You are a designer.',
-        defaultMethod: 'Biomimicry',
-        builtIn: false,
-      });
-    });
-
-    it('sets builtIn to false for user personas', () => {
-      fs.mkdirSync(personasDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(personasDir, 'p.yaml'),
-        YAML.stringify({ name: 'P', systemPrompt: 'prompt' }),
-      );
-
-      const personas = configModule.loadUserPersonas();
-      expect(personas).toHaveLength(1);
-      expect(personas[0].builtIn).toBe(false);
-    });
-
-    it('skips files missing required fields', () => {
-      fs.mkdirSync(personasDir, { recursive: true });
-      // Missing systemPrompt
-      fs.writeFileSync(
-        path.join(personasDir, 'bad.yaml'),
-        YAML.stringify({ name: 'Incomplete' }),
-      );
-
-      const personas = configModule.loadUserPersonas();
-      expect(personas).toHaveLength(0);
-    });
-
-    it('skips malformed YAML files with warning', () => {
-      fs.mkdirSync(personasDir, { recursive: true });
-      fs.writeFileSync(path.join(personasDir, 'broken.yaml'), '{{{{invalid');
-
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-      const personas = configModule.loadUserPersonas();
-      expect(personas).toHaveLength(0);
-      expect(warnSpy).toHaveBeenCalled();
-
-      warnSpy.mockRestore();
-    });
-
-    it('loads JSON persona files', () => {
-      fs.mkdirSync(personasDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(personasDir, 'dev.json'),
-        JSON.stringify({ name: 'Dev', systemPrompt: 'You are a dev.' }),
-      );
-
-      const personas = configModule.loadUserPersonas();
-      expect(personas).toHaveLength(1);
-      expect(personas[0].name).toBe('Dev');
-    });
-
-    it('defaultMethod is undefined when not provided', () => {
-      fs.mkdirSync(personasDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(personasDir, 'simple.yaml'),
-        YAML.stringify({ name: 'Simple', systemPrompt: 'prompt' }),
-      );
-
-      const personas = configModule.loadUserPersonas();
-      expect(personas[0].defaultMethod).toBeUndefined();
     });
   });
 
@@ -458,38 +359,4 @@ describe('config module', () => {
       expect(methods[0].name).toBe('First Principles');
     });
   });
-
-  // -----------------------------------------------------------------------
-  // getAllPersonas
-  // -----------------------------------------------------------------------
-
-  describe('getAllPersonas', () => {
-    it('returns 3 built-in personas when no user personas exist', () => {
-      const personas = configModule.getAllPersonas();
-      expect(personas).toHaveLength(3);
-      expect(personas.every((p) => p.builtIn === true)).toBe(true);
-    });
-
-    it('returns built-in + user personas merged', () => {
-      fs.mkdirSync(personasDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(personasDir, 'custom.yaml'),
-        YAML.stringify({ name: 'Custom Persona', systemPrompt: 'Be creative.' }),
-      );
-
-      const personas = configModule.getAllPersonas();
-      expect(personas).toHaveLength(4);
-
-      // First 3 are built-in
-      expect(personas[0].name).toBe('The Engineer');
-      expect(personas[1].name).toBe('The Visionary');
-      expect(personas[2].name).toBe('The Anthropologist');
-      expect(personas.slice(0, 3).every((p) => p.builtIn === true)).toBe(true);
-
-      // Last one is user-defined
-      expect(personas[3].name).toBe('Custom Persona');
-      expect(personas[3].builtIn).toBe(false);
-    });
-  });
-
 });

@@ -19,7 +19,7 @@ export const OutputPackageSchema = z.object({
     domain: z.string(),
     coordinate: z.string(),
     methods: z.array(z.string()),
-    workerCount: z.number(),
+    methodCount: z.number(),
     totalIdeasGenerated: z.number(),
     totalIdeasSurvived: z.number(),
     duration: z.number(),

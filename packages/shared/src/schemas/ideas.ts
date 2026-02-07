@@ -37,3 +37,10 @@ export const ScoredIdeaSchema = z.object({
 });
 
 export type ScoredIdea = z.infer<typeof ScoredIdeaSchema>;
+
+export const EvolvedConceptSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  sourceIds: z.array(z.string()),
+});
+export type EvolvedConcept = z.infer<typeof EvolvedConceptSchema>;

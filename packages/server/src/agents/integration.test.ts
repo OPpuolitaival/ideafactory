@@ -47,7 +47,7 @@ vi.mock('../db/index.js', async () => {
 // Mock: config
 // ---------------------------------------------------------------------------
 const defaultConfig = {
-  defaults: { workerCount: 2, ideasPerWorker: 3, webSearch: false },
+  defaults: { ideasPerWorker: 2, webSearch: false },
   models: {
     default: 'claude-sonnet-4-20250514',
     navigator: 'claude-haiku-4-20250414',
@@ -64,15 +64,9 @@ const allMethods = [
   { id: 5, name: 'SCAMPER', description: 'Transform existing ideas', goodFor: 'Improvement', builtIn: true },
 ];
 
-const allPersonas = [
-  { name: 'The Engineer', systemPrompt: 'You are The Engineer. Practical, detail-oriented.', defaultMethod: 'First Principles', builtIn: true },
-  { name: 'The Visionary', systemPrompt: 'You are The Visionary. Bold, future-focused.', defaultMethod: 'SCAMPER', builtIn: true },
-];
-
 vi.mock('../config/index.js', () => ({
   loadConfig: () => defaultConfig,
   getAllMethods: () => allMethods,
-  getAllPersonas: () => allPersonas,
 }));
 
 // ---------------------------------------------------------------------------
@@ -119,13 +113,12 @@ const taxonomyTree = {
   ],
 };
 
-// Stage 2: Method Selection
+// Stage 2: Method Selection (recommends 2 of 3 available methods)
 const methodRecommendation = {
-  recommended: [1, 3, 5],
+  recommended: [1, 3],
   reasoning: {
     '1': 'First Principles helps rethink urban mobility from scratch',
     '3': 'TRIZ helps resolve range vs cost contradictions',
-    '5': 'SCAMPER transforms existing transit concepts',
   },
 };
 
@@ -150,24 +143,23 @@ const rubric = {
   ],
 };
 
-// Stage 4a: Divergence – Worker 0 ideas
+// Stage 4a: Divergence – Worker 0 ideas (2 ideas, First Principles method)
 const worker0Ideas = [
   { id: 'idea-0-1', method: 'First Principles', name: 'SolarPod', description: 'Solar-powered personal mobility pods', probability: 'high' },
-  { id: 'idea-0-2', method: 'TRIZ', name: 'FlexLane', description: 'Dynamic lane reallocation system', probability: 'medium' },
-  { id: 'idea-0-3', method: 'SCAMPER', name: 'AirBridge', description: 'Lightweight aerial cable cars for urban areas', probability: 'low' },
+  { id: 'idea-0-2', method: 'First Principles', name: 'FlexLane', description: 'Dynamic lane reallocation system', probability: 'medium' },
 ];
 
-// Stage 4a: Divergence – Worker 1 ideas
+// Stage 4a: Divergence – Worker 1 ideas (2 ideas, TRIZ method)
 const worker1Ideas = [
-  { id: 'idea-1-1', method: 'SCAMPER', name: 'NeighborHub', description: 'Hyperlocal car-sharing hubs in neighborhoods', probability: 'high' },
-  { id: 'idea-1-2', method: 'First Principles', name: 'ModularBus', description: 'Modular bus segments that join/split on route', probability: 'medium' },
-  { id: 'idea-1-3', method: 'TRIZ', name: 'QuantumRoute', description: 'Quantum-optimized routing for existing transit', probability: 'low' },
+  { id: 'idea-1-1', method: 'TRIZ', name: 'NeighborHub', description: 'Hyperlocal car-sharing hubs in neighborhoods', probability: 'high' },
+  { id: 'idea-1-2', method: 'TRIZ', name: 'ModularBus', description: 'Modular bus segments that join/split on route', probability: 'medium' },
 ];
 
-// Stage 4b: Convergence – scored ideas
+// Stage 4b: Convergence – scored ideas (4 items in 1 batch, 2 pass gates + 2 fail)
+// Code does gate elimination after scoring, so all returned with eliminated: false
 const scoredIdeas = [
   {
-    id: 'scored-1', sourceIds: ['idea-0-1'], name: 'SolarPod', description: 'Solar-powered mobility pods',
+    id: 'scored-1', sourceIds: ['worker-0-0'], name: 'SolarPod', description: 'Solar-powered mobility pods',
     gateResults: [
       { gateId: 'g1', pass: true, reason: 'Feasible with current solar tech' },
       { gateId: 'g2', pass: true, reason: 'Classifiable as micro-vehicle' },
@@ -183,11 +175,21 @@ const scoredIdeas = [
     totalScore: 20, eliminated: false,
   },
   {
-    id: 'scored-2', sourceIds: ['idea-1-1', 'idea-0-2'], name: 'NeighborHub+FlexLane', description: 'Combined hub and dynamic lane system',
+    id: 'scored-2', sourceIds: ['worker-0-1'], name: 'FlexLane', description: 'Dynamic lane reallocation',
     gateResults: [
-      { gateId: 'g1', pass: true, reason: 'Both feasible' },
-      { gateId: 'g2', pass: true, reason: 'Regulatory path exists' },
-      { gateId: 'g3', pass: true, reason: 'Multi-modal solution' },
+      { gateId: 'g1', pass: true, reason: 'Uses existing roads' },
+      { gateId: 'g2', pass: false, reason: 'Complex regulatory approval needed' },
+      { gateId: 'g3', pass: true, reason: 'Reduces congestion' },
+    ],
+    criteriaScores: [],
+    totalScore: 0, eliminated: false,
+  },
+  {
+    id: 'scored-3', sourceIds: ['worker-1-0'], name: 'NeighborHub', description: 'Hyperlocal car-sharing hubs',
+    gateResults: [
+      { gateId: 'g1', pass: true, reason: 'Uses existing vehicles' },
+      { gateId: 'g2', pass: true, reason: 'Fits sharing economy regs' },
+      { gateId: 'g3', pass: true, reason: 'Solves access problem' },
     ],
     criteriaScores: [
       { criterionId: 'c1', score: 3, reason: 'Incremental innovation' },
@@ -199,86 +201,55 @@ const scoredIdeas = [
     totalScore: 20, eliminated: false,
   },
   {
-    id: 'scored-3', sourceIds: ['idea-0-3'], name: 'AirBridge', description: 'Urban aerial cable cars',
+    id: 'scored-4', sourceIds: ['worker-1-1'], name: 'ModularBus', description: 'Modular bus segments',
     gateResults: [
-      { gateId: 'g1', pass: true, reason: 'Technically feasible' },
-      { gateId: 'g2', pass: false, reason: 'Complex airspace regulation' },
-      { gateId: 'g3', pass: true, reason: 'Solves congestion' },
-    ],
-    criteriaScores: [],
-    totalScore: 0, eliminated: true, eliminationReason: 'Failed gate g2: airspace regulations',
-  },
-  {
-    id: 'scored-4', sourceIds: ['idea-1-3'], name: 'QuantumRoute', description: 'Quantum routing',
-    gateResults: [
-      { gateId: 'g1', pass: false, reason: 'Quantum computers not mature enough' },
+      { gateId: 'g1', pass: false, reason: 'Complex mechanical coupling not proven' },
       { gateId: 'g2', pass: true, reason: 'Software only' },
       { gateId: 'g3', pass: true, reason: 'Addresses routing' },
     ],
     criteriaScores: [],
-    totalScore: 0, eliminated: true, eliminationReason: 'Failed gate g1: technology not ready',
+    totalScore: 0, eliminated: false,
   },
 ];
 
-// Stage 4c: Evolution – only survivors
-const evolvedIdeas = [
+// Stage 4c: Evolution – EvolvedConcept from cross-pollination of 2 survivors
+const evolvedConcepts = [
+  { name: 'SolarHub', description: 'Solar-powered pods integrated with neighborhood sharing hubs', sourceIds: ['scored-1', 'scored-3'] },
+];
+
+// Stage 4c: Re-scored evolved concept
+const rescoredEvolved = [
   {
-    id: 'scored-1', sourceIds: ['idea-0-1'], name: 'SolarPod v2', description: 'Improved solar pods with swappable batteries and subscription pricing',
+    id: 'evolved-0', sourceIds: ['scored-1', 'scored-3'], name: 'SolarHub',
+    description: 'Solar-powered pods integrated with neighborhood sharing hubs',
     gateResults: [
-      { gateId: 'g1', pass: true, reason: 'Enhanced design' },
-      { gateId: 'g2', pass: true, reason: 'Still micro-vehicle' },
-      { gateId: 'g3', pass: true, reason: 'Expanded use cases' },
+      { gateId: 'g1', pass: true, reason: 'Combined feasible tech' },
+      { gateId: 'g2', pass: true, reason: 'Micro-vehicle + sharing regs' },
+      { gateId: 'g3', pass: true, reason: 'Multi-modal solution' },
     ],
     criteriaScores: [
-      { criterionId: 'c1', score: 5, reason: 'More novel with battery swapping' },
-      { criterionId: 'c2', score: 4, reason: 'Buildable' },
-      { criterionId: 'c3', score: 4, reason: 'Subscription reduces upfront cost' },
-      { criterionId: 'c4', score: 5, reason: 'Even higher delight' },
-      { criterionId: 'c5', score: 4, reason: 'Scale via franchising' },
+      { criterionId: 'c1', score: 5, reason: 'Novel combination' },
+      { criterionId: 'c2', score: 5, reason: 'Proven components' },
+      { criterionId: 'c3', score: 4, reason: 'Shared cost model' },
+      { criterionId: 'c4', score: 5, reason: 'High delight' },
+      { criterionId: 'c5', score: 5, reason: 'Hub model scales' },
     ],
-    totalScore: 22, eliminated: false,
-  },
-  {
-    id: 'scored-2', sourceIds: ['idea-1-1', 'idea-0-2'], name: 'SmartHub Network', description: 'AI-managed neighborhood mobility hubs with dynamic lane priority',
-    gateResults: [
-      { gateId: 'g1', pass: true, reason: 'Proven tech' },
-      { gateId: 'g2', pass: true, reason: 'City partnership model' },
-      { gateId: 'g3', pass: true, reason: 'Multi-modal coverage' },
-    ],
-    criteriaScores: [
-      { criterionId: 'c1', score: 4, reason: 'AI management novel' },
-      { criterionId: 'c2', score: 5, reason: 'Leverages existing infra' },
-      { criterionId: 'c3', score: 5, reason: 'Very cost effective' },
-      { criterionId: 'c4', score: 4, reason: 'Convenient access' },
-      { criterionId: 'c5', score: 5, reason: 'Franchisable model' },
-    ],
-    totalScore: 23, eliminated: false,
+    totalScore: 24, eliminated: false,
   },
 ];
 
-// Stage 4d: QA
+// Stage 4d: QA – 1 result for the evolved concept
 const qaResults = [
   {
-    conceptId: 'scored-1',
-    feasibilityScore: 4,
-    risks: [
-      { category: 'Technical', description: 'Battery degradation in heat', severity: 'medium' as const, mitigation: 'Use thermal management system' },
-      { category: 'Market', description: 'Consumer adoption uncertainty', severity: 'medium' as const },
-      { category: 'Regulatory', description: 'Micro-vehicle classification varies by city', severity: 'low' as const },
-    ],
-    verdict: 'strong' as const,
-    summary: 'Strong concept with manageable technical risks and high user appeal.',
-  },
-  {
-    conceptId: 'scored-2',
+    conceptId: 'evolved-0',
     feasibilityScore: 5,
     risks: [
-      { category: 'Political', description: 'Requires city government partnership', severity: 'medium' as const, mitigation: 'Start with pilot programs' },
-      { category: 'Operational', description: 'Fleet management complexity', severity: 'low' as const },
-      { category: 'Competition', description: 'Existing ride-share incumbents', severity: 'high' as const, mitigation: 'Differentiate on hyperlocal focus' },
+      { category: 'Technical', description: 'Battery management', severity: 'medium' as const, mitigation: 'Thermal system' },
+      { category: 'Political', description: 'City partnership needed', severity: 'medium' as const, mitigation: 'Pilot programs' },
+      { category: 'Competition', description: 'Ride-share incumbents', severity: 'high' as const, mitigation: 'Hyperlocal focus' },
     ],
     verdict: 'strong' as const,
-    summary: 'Highly feasible concept with strong scalability but competitive pressure.',
+    summary: 'Strong concept combining solar and hub approaches with high scalability.',
   },
 ];
 
@@ -287,34 +258,24 @@ const outputPackage = {
   concepts: [
     {
       rank: 1,
-      name: 'SmartHub Network',
-      description: 'AI-managed neighborhood mobility hubs with dynamic lane priority',
-      pros: ['Cost effective', 'Uses existing infrastructure', 'Scalable'],
-      cons: ['Requires city partnership', 'Competitive market'],
+      name: 'SolarHub',
+      description: 'Solar-powered pods integrated with neighborhood sharing hubs',
+      pros: ['Novel combination', 'Proven components', 'Scalable'],
+      cons: ['Battery management', 'City partnership needed'],
       openQuestions: ['Which cities to pilot first?'],
-      nextSteps: ['City partnership outreach', 'Pilot program design'],
-      qaVerdict: 'strong' as const,
-    },
-    {
-      rank: 2,
-      name: 'SolarPod v2',
-      description: 'Solar-powered personal mobility pods with subscription model',
-      pros: ['High user delight', 'Novel form factor', 'Green energy'],
-      cons: ['Battery management needed', 'Consumer adoption risk'],
-      openQuestions: ['Pricing model validation?'],
-      nextSteps: ['Prototype build', 'Focus group testing'],
+      nextSteps: ['City partnership outreach', 'Prototype build'],
       qaVerdict: 'strong' as const,
     },
   ],
   overallInsights: 'Urban mobility innovation favors infrastructure-light solutions that integrate with existing transit.',
-  suggestedNextSprint: ['Build SmartHub pilot proposal', 'Design SolarPod prototype spec'],
+  suggestedNextSprint: ['Build SolarHub pilot proposal', 'Design prototype spec'],
   sessionMetadata: {
     domain: 'Sustainable Urban Mobility',
     coordinate: 'Electric Vehicles > Personal EVs',
-    methods: ['First Principles', 'TRIZ', 'SCAMPER'],
-    workerCount: 2,
-    totalIdeasGenerated: 6,
-    totalIdeasSurvived: 2,
+    methods: ['First Principles', 'TRIZ'],
+    methodCount: 2,
+    totalIdeasGenerated: 4,
+    totalIdeasSurvived: 1,
     duration: 45000,
   },
 };
@@ -322,12 +283,14 @@ const outputPackage = {
 // Stage 5: Visual artifacts
 const visualArtifacts = [
   { type: 'radar_chart' as const, format: 'svg' as const, content: '<svg viewBox="0 0 400 400"><circle cx="200" cy="200" r="150" fill="none" stroke="#666"/></svg>', label: 'Concept Comparison Radar' },
-  { type: 'concept_sketch' as const, format: 'svg' as const, content: '<svg viewBox="0 0 300 200"><rect x="50" y="50" width="200" height="100" fill="none" stroke="#0ff"/></svg>', label: 'SolarPod v2 Sketch' },
+  { type: 'concept_sketch' as const, format: 'svg' as const, content: '<svg viewBox="0 0 300 200"><rect x="50" y="50" width="200" height="100" fill="none" stroke="#0ff"/></svg>', label: 'SolarHub Sketch' },
   { type: 'report_page' as const, format: 'html' as const, content: '<html><body style="background:#0a0a0f;color:#fff"><h1>Session Report</h1></body></html>', label: 'Full Report' },
 ];
 
 // ---------------------------------------------------------------------------
-// Setup mock responses in order: taxonomy(1) + methods(1) + rubric(1) + factory(5) + output(2) = 10 calls
+// Setup mock responses in order:
+// taxonomy(1) + methods(1) + rubric(1) + factory(6) + output(2) = 11 calls
+// Factory: 2 diverge + 1 converge batch + 1 evolution + 1 rescore + 1 QA = 6
 // ---------------------------------------------------------------------------
 
 function setupAllMocks() {
@@ -338,14 +301,16 @@ function setupAllMocks() {
     .mockReturnValueOnce(queryResult(JSON.stringify(methodRecommendation)))
     // Stage 3: Rubric
     .mockReturnValueOnce(queryResult(JSON.stringify(rubric)))
-    // Stage 4a: Divergence worker 0
+    // Stage 4a: Divergence worker 0 (First Principles)
     .mockReturnValueOnce(queryResult(JSON.stringify(worker0Ideas)))
-    // Stage 4a: Divergence worker 1
+    // Stage 4a: Divergence worker 1 (TRIZ)
     .mockReturnValueOnce(queryResult(JSON.stringify(worker1Ideas)))
-    // Stage 4b: Convergence
+    // Stage 4b: Convergence batch (4 ideas in 1 batch)
     .mockReturnValueOnce(queryResult(JSON.stringify(scoredIdeas)))
-    // Stage 4c: Evolution
-    .mockReturnValueOnce(queryResult(JSON.stringify(evolvedIdeas)))
+    // Stage 4c: Evolution worker 0 (1 pair)
+    .mockReturnValueOnce(queryResult(JSON.stringify(evolvedConcepts)))
+    // Stage 4c: Rescore batch (1 evolved concept)
+    .mockReturnValueOnce(queryResult(JSON.stringify(rescoredEvolved)))
     // Stage 4d: QA
     .mockReturnValueOnce(queryResult(JSON.stringify(qaResults)))
     // Stage 5: Output package
@@ -387,7 +352,7 @@ describe('Integration – Full Pipeline end-to-end', () => {
       status: 'taxonomy',
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      config: JSON.stringify({ workerCount: 2, ideasPerWorker: 3, webSearch: false }),
+      config: JSON.stringify({ ideasPerWorker: 2, webSearch: false }),
     });
   });
 
@@ -409,9 +374,9 @@ describe('Integration – Full Pipeline end-to-end', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 2. Makes exactly 10 LLM calls across all stages
+  // 2. Makes exactly 11 LLM calls across all stages
   // -----------------------------------------------------------------------
-  it('makes exactly 10 LLM calls across all stages', async () => {
+  it('makes exactly 11 LLM calls across all stages', async () => {
     setupAllMocks();
 
     await runPipeline(SESSION_ID, 'taxonomy');
@@ -420,8 +385,8 @@ describe('Integration – Full Pipeline end-to-end', () => {
     await runPipeline(SESSION_ID, 'factory');
     await runPipeline(SESSION_ID, 'output');
 
-    // taxonomy=1, methods=1, rubric=1, factory=5 (2 div + 1 conv + 1 evo + 1 qa), output=2
-    expect(mockQuery).toHaveBeenCalledTimes(10);
+    // taxonomy=1, methods=1, rubric=1, factory=6 (2 div + 1 conv + 1 evo + 1 rescore + 1 qa), output=2
+    expect(mockQuery).toHaveBeenCalledTimes(11);
   });
 
   // -----------------------------------------------------------------------
@@ -459,9 +424,9 @@ describe('Integration – Full Pipeline end-to-end', () => {
 
     expect(methodRow).toBeDefined();
     const recommended = JSON.parse(methodRow.recommended);
-    expect(recommended).toEqual([1, 3, 5]);
+    expect(recommended).toEqual([1, 3]);
     const reasoning = JSON.parse(methodRow.reasoning);
-    expect(Object.keys(reasoning)).toHaveLength(3);
+    expect(Object.keys(reasoning)).toHaveLength(2);
   });
 
   // -----------------------------------------------------------------------
@@ -505,21 +470,21 @@ describe('Integration – Full Pipeline end-to-end', () => {
     const phases = new Set(allIdeas.map((i) => i.phase));
     expect(phases).toEqual(new Set(['diverge', 'converge', 'evolve', 'qa']));
 
-    // Diverge: 2 workers x 3 ideas = 6
+    // Diverge: 2 workers x 2 ideas = 4
     const divergeRows = allIdeas.filter((i) => i.phase === 'diverge');
-    expect(divergeRows).toHaveLength(6);
+    expect(divergeRows).toHaveLength(4);
 
     // Converge: 4 scored ideas (2 survivors + 2 eliminated)
     const convergeRows = allIdeas.filter((i) => i.phase === 'converge');
     expect(convergeRows).toHaveLength(4);
 
-    // Evolve: 2 evolved survivors
+    // Evolve: 1 re-scored evolved concept
     const evolveRows = allIdeas.filter((i) => i.phase === 'evolve');
-    expect(evolveRows).toHaveLength(2);
+    expect(evolveRows).toHaveLength(1);
 
-    // QA: 2 results
+    // QA: 1 result
     const qaRows = allIdeas.filter((i) => i.phase === 'qa');
-    expect(qaRows).toHaveLength(2);
+    expect(qaRows).toHaveLength(1);
   });
 
   // -----------------------------------------------------------------------
@@ -542,8 +507,8 @@ describe('Integration – Full Pipeline end-to-end', () => {
     expect(outputRow).toBeDefined();
 
     const storedPkg = JSON.parse(outputRow.package);
-    expect(storedPkg.concepts).toHaveLength(2);
-    expect(storedPkg.concepts[0].name).toBe('SmartHub Network');
+    expect(storedPkg.concepts).toHaveLength(1);
+    expect(storedPkg.concepts[0].name).toBe('SolarHub');
     expect(storedPkg.overallInsights).toContain('infrastructure-light');
 
     const storedArtifacts = JSON.parse(outputRow.artifacts!);
@@ -651,7 +616,6 @@ describe('Integration – Full Pipeline end-to-end', () => {
     const rubricPrompt = mockQuery.mock.calls[2][0].prompt;
     expect(rubricPrompt).toContain('First Principles');
     expect(rubricPrompt).toContain('TRIZ');
-    expect(rubricPrompt).toContain('SCAMPER');
   });
 
   // -----------------------------------------------------------------------
@@ -672,8 +636,8 @@ describe('Integration – Full Pipeline end-to-end', () => {
 
     // Factory convergence call (6th, index 5) should include all raw ideas + rubric
     const convergeCall = mockQuery.mock.calls[5][0];
-    expect(convergeCall.prompt).toContain('idea-0-1');
-    expect(convergeCall.prompt).toContain('idea-1-1');
+    expect(convergeCall.prompt).toContain('worker-0-0');
+    expect(convergeCall.prompt).toContain('worker-1-0');
   });
 
   // -----------------------------------------------------------------------
@@ -688,10 +652,9 @@ describe('Integration – Full Pipeline end-to-end', () => {
     await runPipeline(SESSION_ID, 'factory');
     await runPipeline(SESSION_ID, 'output');
 
-    // Output call (9th, index 8) should reference evolved concepts
-    const outputPrompt = mockQuery.mock.calls[8][0].prompt;
-    expect(outputPrompt).toContain('SolarPod v2');
-    expect(outputPrompt).toContain('SmartHub Network');
+    // Output call (10th, index 9) should reference evolved concept
+    const outputPrompt = mockQuery.mock.calls[9][0].prompt;
+    expect(outputPrompt).toContain('SolarHub');
   });
 
   // -----------------------------------------------------------------------
@@ -723,9 +686,9 @@ describe('Integration – Full Pipeline end-to-end', () => {
     const rubrics = await testDb.select().from(schema.rubrics);
     expect(rubrics).toHaveLength(1);
 
-    // Ideas (across all phases)
+    // Ideas (across all phases): 4 diverge + 4 converge + 1 evolve + 1 qa = 10
     const ideas = await testDb.select().from(schema.ideas);
-    expect(ideas.length).toBeGreaterThanOrEqual(14); // 6 diverge + 4 converge + 2 evolve + 2 qa
+    expect(ideas.length).toBeGreaterThanOrEqual(10);
 
     // Output packages
     const outputs = await testDb.select().from(schema.outputPackages);
@@ -790,14 +753,15 @@ describe('Integration – Full Pipeline end-to-end', () => {
     expect(mockQuery.mock.calls[3][0].options.model).toBe('claude-sonnet-4-20250514');
     expect(mockQuery.mock.calls[4][0].options.model).toBe('claude-sonnet-4-20250514');
 
-    // Calls 5-7: factory converge/evolve/qa → analyst model
+    // Calls 5-8: factory converge/evolve/rescore/qa → analyst model
     expect(mockQuery.mock.calls[5][0].options.model).toBe('claude-sonnet-4-20250514');
     expect(mockQuery.mock.calls[6][0].options.model).toBe('claude-sonnet-4-20250514');
     expect(mockQuery.mock.calls[7][0].options.model).toBe('claude-sonnet-4-20250514');
-
-    // Calls 8-9: output → analyst model
     expect(mockQuery.mock.calls[8][0].options.model).toBe('claude-sonnet-4-20250514');
+
+    // Calls 9-10: output → analyst model
     expect(mockQuery.mock.calls[9][0].options.model).toBe('claude-sonnet-4-20250514');
+    expect(mockQuery.mock.calls[10][0].options.model).toBe('claude-sonnet-4-20250514');
   });
 
   // -----------------------------------------------------------------------
@@ -819,14 +783,14 @@ describe('Integration – Full Pipeline end-to-end', () => {
     const worker0Rows = divergeRows.filter((r) => r.workerId === 'worker-0');
     const worker1Rows = divergeRows.filter((r) => r.workerId === 'worker-1');
 
-    expect(worker0Rows).toHaveLength(3);
-    expect(worker1Rows).toHaveLength(3);
+    expect(worker0Rows).toHaveLength(2);
+    expect(worker1Rows).toHaveLength(2);
 
     for (const row of worker0Rows) {
-      expect(row.persona).toBe('The Engineer');
+      expect(row.persona).toBe('First Principles');
     }
     for (const row of worker1Rows) {
-      expect(row.persona).toBe('The Visionary');
+      expect(row.persona).toBe('TRIZ');
     }
   });
 
@@ -846,8 +810,8 @@ describe('Integration – Full Pipeline end-to-end', () => {
       .from(schema.ideas)
       .where(and(eq(schema.ideas.sessionId, SESSION_ID), eq(schema.ideas.phase, 'qa')));
 
-    // Both verdicts are "strong" so both should have eliminated=0
-    expect(qaRows).toHaveLength(2);
+    // 1 verdict "strong" → eliminated=0
+    expect(qaRows).toHaveLength(1);
     for (const row of qaRows) {
       expect(row.eliminated).toBe(0);
     }
@@ -896,8 +860,8 @@ describe('Integration – Full Pipeline end-to-end', () => {
       (e) => e.sessionId === SESSION_ID && e.event.type === 'data:idea_stream',
     );
 
-    // 2 workers x 3 ideas = 6 events
-    expect(ideaStreamEvents).toHaveLength(6);
+    // 2 workers x 2 ideas = 4 events
+    expect(ideaStreamEvents).toHaveLength(4);
 
     // Each should have workerId and persona
     for (const e of ideaStreamEvents) {

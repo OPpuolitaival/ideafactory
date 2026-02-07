@@ -59,7 +59,7 @@ function insertSession(db: TestDb, id: string, domain = 'test domain') {
     status: 'factory',
     createdAt: Date.now(),
     updatedAt: Date.now(),
-    config: JSON.stringify({ workerCount: 2, ideasPerWorker: 3 }),
+    config: JSON.stringify({ ideasPerWorker: 2 }),
   });
 }
 
@@ -92,30 +92,27 @@ const methods = [
   { id: 3, name: 'TRIZ', description: 'Contradiction-solving', goodFor: 'Trade-offs', builtIn: true },
 ];
 
-const personas = [
-  { name: 'The Engineer', systemPrompt: 'You are The Engineer...', defaultMethod: 'First Principles', builtIn: true },
-  { name: 'The Visionary', systemPrompt: 'You are The Visionary...', defaultMethod: 'Inversion', builtIn: true },
-];
-
-/** Worker 0 diverge ideas (3 ideas) - LLM returns WITHOUT workerId/persona */
+/** Worker 0 diverge ideas (2 ideas) */
 const worker0Ideas = [
   { id: 'idea-0-1', method: 'First Principles', name: 'Idea A', description: 'Desc A', probability: 'high' },
-  { id: 'idea-0-2', method: 'TRIZ', name: 'Idea B', description: 'Desc B', probability: 'medium' },
-  { id: 'idea-0-3', method: 'First Principles', name: 'Idea C', description: 'Desc C', probability: 'low' },
+  { id: 'idea-0-2', method: 'First Principles', name: 'Idea B', description: 'Desc B', probability: 'medium' },
 ];
 
-/** Worker 1 diverge ideas (3 ideas) */
+/** Worker 1 diverge ideas (2 ideas) */
 const worker1Ideas = [
-  { id: 'idea-1-1', method: 'TRIZ', name: 'Idea D', description: 'Desc D', probability: 'high' },
-  { id: 'idea-1-2', method: 'First Principles', name: 'Idea E', description: 'Desc E', probability: 'medium' },
-  { id: 'idea-1-3', method: 'TRIZ', name: 'Idea F', description: 'Desc F', probability: 'low' },
+  { id: 'idea-1-1', method: 'TRIZ', name: 'Idea C', description: 'Desc C', probability: 'high' },
+  { id: 'idea-1-2', method: 'TRIZ', name: 'Idea D', description: 'Desc D', probability: 'medium' },
 ];
 
-/** Scored ideas (convergence output) -- one survivor, one eliminated */
+/**
+ * Convergence batch result: 4 scored ideas from 1 batch (4 ideas <= BATCH_SIZE=5).
+ * Code does gate elimination after scoring, so all returned with eliminated: false.
+ * scored-0 and scored-2 pass all gates (survivors); scored-1 and scored-3 fail g1.
+ */
 const scoredIdeas = [
   {
-    id: 'scored-1',
-    sourceIds: ['idea-0-1'],
+    id: 'scored-0',
+    sourceIds: ['worker-0-0'],
     name: 'Idea A',
     description: 'Desc A',
     gateResults: [
@@ -134,8 +131,8 @@ const scoredIdeas = [
     eliminated: false,
   },
   {
-    id: 'scored-2',
-    sourceIds: ['idea-0-2'],
+    id: 'scored-1',
+    sourceIds: ['worker-0-1'],
     name: 'Idea B',
     description: 'Desc B',
     gateResults: [
@@ -145,18 +142,56 @@ const scoredIdeas = [
     ],
     criteriaScores: [],
     totalScore: 0,
-    eliminated: true,
-    eliminationReason: 'Failed gate g1',
+    eliminated: false,
+  },
+  {
+    id: 'scored-2',
+    sourceIds: ['worker-1-0'],
+    name: 'Idea C',
+    description: 'Desc C',
+    gateResults: [
+      { gateId: 'g1', pass: true, reason: 'Feasible' },
+      { gateId: 'g2', pass: true, reason: 'Compliant' },
+      { gateId: 'g3', pass: true, reason: 'Solves it' },
+    ],
+    criteriaScores: [
+      { criterionId: 'c1', score: 3, reason: 'Somewhat novel' },
+      { criterionId: 'c2', score: 4, reason: 'Buildable' },
+      { criterionId: 'c3', score: 4, reason: 'Good cost' },
+      { criterionId: 'c4', score: 3, reason: 'OK delight' },
+      { criterionId: 'c5', score: 4, reason: 'Scales' },
+    ],
+    totalScore: 18,
+    eliminated: false,
+  },
+  {
+    id: 'scored-3',
+    sourceIds: ['worker-1-1'],
+    name: 'Idea D',
+    description: 'Desc D',
+    gateResults: [
+      { gateId: 'g1', pass: false, reason: 'Not feasible' },
+      { gateId: 'g2', pass: true, reason: 'OK' },
+      { gateId: 'g3', pass: true, reason: 'OK' },
+    ],
+    criteriaScores: [],
+    totalScore: 0,
+    eliminated: false,
   },
 ];
 
-/** Evolved ideas (evolution output) -- only survivors get evolved */
-const evolvedIdeas = [
+/** Evolution result: 1 EvolvedConcept from cross-pollinating the 2 survivors */
+const evolvedConcepts = [
+  { name: 'Hybrid A+C', description: 'Combined best of A and C', sourceIds: ['scored-0', 'scored-2'] },
+];
+
+/** Re-scored evolved concept (batchScore output for evolution) */
+const rescoredEvolved = [
   {
-    id: 'scored-1',
-    sourceIds: ['idea-0-1'],
-    name: 'Idea A Evolved',
-    description: 'Improved Desc A with lower cost and higher delight',
+    id: 'evolved-0',
+    sourceIds: ['scored-0', 'scored-2'],
+    name: 'Hybrid A+C',
+    description: 'Combined best of A and C',
     gateResults: [
       { gateId: 'g1', pass: true, reason: 'Still feasible' },
       { gateId: 'g2', pass: true, reason: 'Still compliant' },
@@ -174,10 +209,10 @@ const evolvedIdeas = [
   },
 ];
 
-/** QA results */
+/** QA results for the evolved concept */
 const qaResults = [
   {
-    conceptId: 'scored-1',
+    conceptId: 'evolved-0',
     feasibilityScore: 4,
     risks: [
       { category: 'Technical', description: 'Complex implementation', severity: 'medium', mitigation: 'Phase rollout' },
@@ -200,20 +235,19 @@ function factoryOptions(sessionId: string) {
     coordinate: 'test > coordinate',
     methods,
     rubric,
-    workerCount: 2,
-    ideasPerWorker: 3,
-    personas,
+    ideasPerWorker: 2,
     workerModel: 'claude-sonnet-4-20250514',
     analystModel: 'claude-sonnet-4-20250514',
   };
 }
 
 /**
- * Set up all 5 mockQuery responses for a full pipeline run:
- * 1. Worker 0 diverge
- * 2. Worker 1 diverge
- * 3. Convergence
- * 4. Evolution
+ * Set up all 6 mockQuery responses for a full pipeline run:
+ * 0. Worker 0 diverge (First Principles)
+ * 1. Worker 1 diverge (TRIZ)
+ * 2. Convergence batch (4 ideas in 1 batch)
+ * 3. Evolution worker 0 (1 pair of survivors)
+ * 4. Rescore batch (1 evolved concept)
  * 5. QA
  */
 function setupFullPipelineMocks() {
@@ -221,7 +255,8 @@ function setupFullPipelineMocks() {
     .mockReturnValueOnce(queryResult(JSON.stringify(worker0Ideas)))
     .mockReturnValueOnce(queryResult(JSON.stringify(worker1Ideas)))
     .mockReturnValueOnce(queryResult(JSON.stringify(scoredIdeas)))
-    .mockReturnValueOnce(queryResult(JSON.stringify(evolvedIdeas)))
+    .mockReturnValueOnce(queryResult(JSON.stringify(evolvedConcepts)))
+    .mockReturnValueOnce(queryResult(JSON.stringify(rescoredEvolved)))
     .mockReturnValueOnce(queryResult(JSON.stringify(qaResults)));
 }
 
@@ -251,8 +286,8 @@ describe('Factory – runFactory full pipeline', () => {
       .from(schema.ideas)
       .where(and(eq(schema.ideas.sessionId, 'sess-full-1'), eq(schema.ideas.phase, 'diverge')));
 
-    // 2 workers x 3 ideas each = 6 diverge ideas
-    expect(divergeRows).toHaveLength(6);
+    // 2 workers x 2 ideas each = 4 diverge ideas
+    expect(divergeRows).toHaveLength(4);
     for (const row of divergeRows) {
       expect(row.phase).toBe('diverge');
       expect(row.workerId).toBeDefined();
@@ -272,8 +307,8 @@ describe('Factory – runFactory full pipeline', () => {
       .from(schema.ideas)
       .where(and(eq(schema.ideas.sessionId, 'sess-full-2'), eq(schema.ideas.phase, 'converge')));
 
-    // 2 scored ideas (1 survivor + 1 eliminated)
-    expect(convergeRows).toHaveLength(2);
+    // 4 scored ideas (2 survivors + 2 eliminated)
+    expect(convergeRows).toHaveLength(4);
     for (const row of convergeRows) {
       expect(row.phase).toBe('converge');
     }
@@ -291,7 +326,7 @@ describe('Factory – runFactory full pipeline', () => {
       .from(schema.ideas)
       .where(and(eq(schema.ideas.sessionId, 'sess-full-3'), eq(schema.ideas.phase, 'evolve')));
 
-    // 1 evolved idea
+    // 1 evolved idea (re-scored and persisted)
     expect(evolveRows).toHaveLength(1);
     for (const row of evolveRows) {
       expect(row.phase).toBe('evolve');
@@ -315,7 +350,7 @@ describe('Factory – runFactory full pipeline', () => {
     expect(qaRows).toHaveLength(1);
     const row = qaRows[0];
     expect(row.phase).toBe('qa');
-    expect(row.name).toBe('scored-1'); // conceptId
+    expect(row.name).toBe('evolved-0'); // conceptId
     expect(row.description).toBe('Solid concept with manageable risks.');
     expect(row.score).toBe(4); // feasibilityScore
   });
@@ -345,14 +380,14 @@ describe('Factory – runFactory full pipeline', () => {
     expect(events).toContain('data:qa_result');
   });
 
-  // 6. Makes exactly 5 LLM calls (2 diverge + 1 converge + 1 evolve + 1 QA)
-  it('makes exactly 5 LLM calls for workerCount=2', async () => {
+  // 6. Makes exactly 6 LLM calls (2 diverge + 1 converge batch + 1 evolution + 1 rescore + 1 QA)
+  it('makes exactly 6 LLM calls', async () => {
     await insertSession(testDb, 'sess-full-6');
     setupFullPipelineMocks();
 
     await runFactory(factoryOptions('sess-full-6'));
 
-    expect(mockQuery).toHaveBeenCalledTimes(5);
+    expect(mockQuery).toHaveBeenCalledTimes(6);
   });
 
   // 7. Converge eliminated ideas have eliminated=1 in DB
@@ -370,8 +405,8 @@ describe('Factory – runFactory full pipeline', () => {
     const survivors = convergeRows.filter((r) => r.eliminated === 0);
     const eliminated = convergeRows.filter((r) => r.eliminated === 1);
 
-    expect(survivors).toHaveLength(1);
-    expect(eliminated).toHaveLength(1);
+    expect(survivors).toHaveLength(2);
+    expect(eliminated).toHaveLength(2);
   });
 
   // 8. QA verdict "strong" results in eliminated=0
@@ -404,8 +439,8 @@ describe('Factory – Divergence phase', () => {
     runFactory = mod.runFactory;
   });
 
-  // 9. Creates N parallel workers
-  it('creates N parallel workers based on workerCount', async () => {
+  // 9. Creates N parallel workers (1 per method)
+  it('creates one worker per method', async () => {
     await insertSession(testDb, 'sess-div-1');
     setupFullPipelineMocks();
 
@@ -416,27 +451,25 @@ describe('Factory – Divergence phase', () => {
     expect(divergeCalls).toHaveLength(2);
   });
 
-  // 10. Each worker gets persona-specific system prompt
-  it('each worker gets persona-specific system prompt', async () => {
+  // 10. Each worker gets method-specific system prompt
+  it('each worker gets method-specific system prompt', async () => {
     await insertSession(testDb, 'sess-div-2');
     setupFullPipelineMocks();
 
     await runFactory(factoryOptions('sess-div-2'));
 
-    // Workers run in parallel so order is not deterministic by call index,
-    // but we can check that both persona prompts appear in the calls
     const divergeCalls = mockQuery.mock.calls.slice(0, 2);
     const systemPrompts = divergeCalls.map((call) => call[0].options.systemPrompt as string);
 
-    const hasEngineer = systemPrompts.some((s) => s.includes('You are The Engineer'));
-    const hasVisionary = systemPrompts.some((s) => s.includes('You are The Visionary'));
+    const hasFirstPrinciples = systemPrompts.some((s) => s.includes('First Principles'));
+    const hasTRIZ = systemPrompts.some((s) => s.includes('TRIZ'));
 
-    expect(hasEngineer).toBe(true);
-    expect(hasVisionary).toBe(true);
+    expect(hasFirstPrinciples).toBe(true);
+    expect(hasTRIZ).toBe(true);
   });
 
-  // 11. Ideas are enriched with workerId and persona name
-  it('enriches ideas with workerId and persona name', async () => {
+  // 11. Ideas are enriched with workerId and method name
+  it('enriches ideas with workerId and method name', async () => {
     await insertSession(testDb, 'sess-div-3');
     setupFullPipelineMocks();
 
@@ -451,14 +484,14 @@ describe('Factory – Divergence phase', () => {
     for (const row of divergeRows) {
       expect(row.workerId).toMatch(/^worker-\d+$/);
       expect(row.persona).toBeTruthy();
-      expect(['The Engineer', 'The Visionary']).toContain(row.persona);
+      expect(['First Principles', 'TRIZ']).toContain(row.persona);
     }
 
-    // Check worker-0 ideas have correct persona
+    // Check worker-0 ideas have correct persona (= method name)
     const worker0Rows = divergeRows.filter((r) => r.workerId === 'worker-0');
-    expect(worker0Rows).toHaveLength(3);
+    expect(worker0Rows).toHaveLength(2);
     for (const row of worker0Rows) {
-      expect(row.persona).toBe('The Engineer');
+      expect(row.persona).toBe('First Principles');
     }
   });
 
@@ -474,8 +507,8 @@ describe('Factory – Divergence phase', () => {
         sid === 'sess-div-4' && evt.type === 'data:idea_stream',
     );
 
-    // 2 workers x 3 ideas = 6 idea_stream events
-    expect(ideaStreamEvents).toHaveLength(6);
+    // 2 workers x 2 ideas = 4 idea_stream events
+    expect(ideaStreamEvents).toHaveLength(4);
 
     // Each should have workerId and persona
     for (const [, evt] of ideaStreamEvents) {
@@ -507,12 +540,12 @@ describe('Factory – Convergence phase', () => {
 
     await runFactory(factoryOptions('sess-conv-1'));
 
-    // Third call (index 2) is convergence
+    // Third call (index 2) is convergence batch
     const userMessage = mockQuery.mock.calls[2][0].prompt;
 
-    // Should reference all 6 ideas from both workers
-    expect(userMessage).toContain('idea-0-1');
-    expect(userMessage).toContain('idea-1-1');
+    // Should reference all 4 ideas (stable IDs: worker-{i}-{j})
+    expect(userMessage).toContain('worker-0-0');
+    expect(userMessage).toContain('worker-1-0');
     // Should include rubric
     expect(userMessage).toContain('Rubric');
   });
@@ -532,10 +565,10 @@ describe('Factory – Convergence phase', () => {
 
     expect(convergenceEvents).toHaveLength(1);
     const { survivors, eliminated } = convergenceEvents[0][1].data;
-    expect(survivors).toHaveLength(1);
-    expect(eliminated).toHaveLength(1);
-    expect(survivors[0].id).toBe('scored-1');
-    expect(eliminated[0].id).toBe('scored-2');
+    expect(survivors).toHaveLength(2);
+    expect(eliminated).toHaveLength(2);
+    expect(survivors[0].id).toBe('scored-0');
+    expect(eliminated[0].id).toBe('scored-1');
   });
 
   // 16. SSE data:convergence_result emitted
@@ -565,14 +598,18 @@ describe('Factory – Convergence phase', () => {
       .from(schema.ideas)
       .where(and(eq(schema.ideas.sessionId, 'sess-conv-5'), eq(schema.ideas.phase, 'converge')));
 
-    const survivorRow = convergeRows.find((r) => r.eliminated === 0);
-    const eliminatedRow = convergeRows.find((r) => r.eliminated === 1);
+    const survivorRows = convergeRows.filter((r) => r.eliminated === 0);
+    const eliminatedRows = convergeRows.filter((r) => r.eliminated === 1);
 
-    expect(survivorRow).toBeDefined();
-    expect(survivorRow!.score).toBe(19);
+    expect(survivorRows).toHaveLength(2);
+    // Survivors sorted by score: scored-0 (19) then scored-2 (18)
+    const scores = survivorRows.map((r) => r.score).sort((a, b) => (b ?? 0) - (a ?? 0));
+    expect(scores).toEqual([19, 18]);
 
-    expect(eliminatedRow).toBeDefined();
-    expect(eliminatedRow!.score).toBe(0);
+    expect(eliminatedRows).toHaveLength(2);
+    for (const row of eliminatedRows) {
+      expect(row.score).toBe(0);
+    }
   });
 });
 
@@ -590,23 +627,26 @@ describe('Factory – Evolution phase', () => {
     runFactory = mod.runFactory;
   });
 
-  // 19. Evolution receives only survivors
-  it('evolution LLM call receives only survivors, not eliminated ideas', async () => {
+  // 19. Evolution receives only survivors as pairs
+  it('evolution LLM call receives only survivors as pairs, not eliminated ideas', async () => {
     await insertSession(testDb, 'sess-evo-1');
     setupFullPipelineMocks();
 
     await runFactory(factoryOptions('sess-evo-1'));
 
-    // Fourth call (index 3) is evolution
+    // Fourth call (index 3) is evolution worker 0
     const userMessage = mockQuery.mock.calls[3][0].prompt;
 
-    // Should reference scored-1 (survivor) but not scored-2 (eliminated)
-    expect(userMessage).toContain('scored-1');
-    expect(userMessage).not.toContain('scored-2');
+    // Should reference scored-0 and scored-2 (survivors) as a pair
+    expect(userMessage).toContain('scored-0');
+    expect(userMessage).toContain('scored-2');
+    // Should NOT reference eliminated ideas
+    expect(userMessage).not.toContain('scored-1');
+    expect(userMessage).not.toContain('scored-3');
   });
 
-  // 20. Evolution returns evolved concepts
-  it('returns evolved concepts with updated descriptions and scores', async () => {
+  // 20. Evolution returns evolved concepts with re-scored data
+  it('persists re-scored evolved concepts to DB', async () => {
     await insertSession(testDb, 'sess-evo-2');
     setupFullPipelineMocks();
 
@@ -618,7 +658,7 @@ describe('Factory – Evolution phase', () => {
       .where(and(eq(schema.ideas.sessionId, 'sess-evo-2'), eq(schema.ideas.phase, 'evolve')));
 
     expect(evolveRows).toHaveLength(1);
-    expect(evolveRows[0].name).toBe('Idea A Evolved');
+    expect(evolveRows[0].name).toBe('Hybrid A+C');
     expect(evolveRows[0].score).toBe(23);
   });
 
@@ -660,12 +700,12 @@ describe('Factory – QA phase', () => {
 
     await runFactory(factoryOptions('sess-qa-1'));
 
-    // Fifth call (index 4) is QA
-    const userMessage = mockQuery.mock.calls[4][0].prompt;
+    // Sixth call (index 5) is QA
+    const userMessage = mockQuery.mock.calls[5][0].prompt;
 
-    // Should reference the evolved concept
-    expect(userMessage).toContain('Idea A Evolved');
-    expect(userMessage).toContain('scored-1');
+    // Should reference the re-scored evolved concept
+    expect(userMessage).toContain('Hybrid A+C');
+    expect(userMessage).toContain('evolved-0');
   });
 
   // 24. QA returns results with feasibility, risks, verdict
@@ -710,7 +750,7 @@ describe('Factory – QA phase', () => {
 
     const weakQaResults = [
       {
-        conceptId: 'scored-1',
+        conceptId: 'evolved-0',
         feasibilityScore: 2,
         risks: [
           { category: 'Technical', description: 'Too complex', severity: 'critical' },
@@ -726,7 +766,8 @@ describe('Factory – QA phase', () => {
       .mockReturnValueOnce(queryResult(JSON.stringify(worker0Ideas)))
       .mockReturnValueOnce(queryResult(JSON.stringify(worker1Ideas)))
       .mockReturnValueOnce(queryResult(JSON.stringify(scoredIdeas)))
-      .mockReturnValueOnce(queryResult(JSON.stringify(evolvedIdeas)))
+      .mockReturnValueOnce(queryResult(JSON.stringify(evolvedConcepts)))
+      .mockReturnValueOnce(queryResult(JSON.stringify(rescoredEvolved)))
       .mockReturnValueOnce(queryResult(JSON.stringify(weakQaResults)));
 
     await runFactory(factoryOptions('sess-qa-5'));
@@ -754,92 +795,135 @@ describe('Factory – Edge cases', () => {
     runFactory = mod.runFactory;
   });
 
-  // 28. Single worker (workerCount=1)
-  it('works with a single worker (workerCount=1)', async () => {
+  // 28. Single method (single worker) — 1 survivor → 0 evolution pairs → fallback
+  it('works with a single method (single worker)', async () => {
     await insertSession(testDb, 'sess-edge-1');
 
-    // Only 1 diverge call + 1 converge + 1 evolve + 1 QA = 4 total
+    // Convergence with 1 survivor from 2 ideas → 0 pairs → evolution fallback → QA with original survivor
+    const singleMethodScored = [
+      {
+        id: 'scored-0', sourceIds: ['worker-0-0'], name: 'Idea A', description: 'Desc A',
+        gateResults: [
+          { gateId: 'g1', pass: true, reason: 'OK' },
+          { gateId: 'g2', pass: true, reason: 'OK' },
+          { gateId: 'g3', pass: true, reason: 'OK' },
+        ],
+        criteriaScores: [
+          { criterionId: 'c1', score: 4, reason: 'Novel' },
+          { criterionId: 'c2', score: 5, reason: 'Buildable' },
+          { criterionId: 'c3', score: 3, reason: 'OK' },
+          { criterionId: 'c4', score: 4, reason: 'OK' },
+          { criterionId: 'c5', score: 3, reason: 'OK' },
+        ],
+        totalScore: 19, eliminated: false,
+      },
+      {
+        id: 'scored-1', sourceIds: ['worker-0-1'], name: 'Idea B', description: 'Desc B',
+        gateResults: [
+          { gateId: 'g1', pass: false, reason: 'Nope' },
+          { gateId: 'g2', pass: true, reason: 'OK' },
+          { gateId: 'g3', pass: true, reason: 'OK' },
+        ],
+        criteriaScores: [], totalScore: 0, eliminated: false,
+      },
+    ];
+
+    const singleMethodQa = [
+      {
+        conceptId: 'scored-0', feasibilityScore: 4,
+        risks: [
+          { category: 'Technical', description: 'Complex', severity: 'medium', mitigation: 'Plan' },
+          { category: 'Market', description: 'Risk', severity: 'low' },
+          { category: 'Cost', description: 'Expensive', severity: 'medium', mitigation: 'Fund' },
+        ],
+        verdict: 'strong', summary: 'Good concept.',
+      },
+    ];
+
+    // 1 diverge + 1 converge batch + 0 evolution (1 survivor, 0 pairs) + 1 QA = 3
     mockQuery
       .mockReturnValueOnce(queryResult(JSON.stringify(worker0Ideas)))
-      .mockReturnValueOnce(queryResult(JSON.stringify(scoredIdeas)))
-      .mockReturnValueOnce(queryResult(JSON.stringify(evolvedIdeas)))
-      .mockReturnValueOnce(queryResult(JSON.stringify(qaResults)));
+      .mockReturnValueOnce(queryResult(JSON.stringify(singleMethodScored)))
+      .mockReturnValueOnce(queryResult(JSON.stringify(singleMethodQa)));
 
     const opts = factoryOptions('sess-edge-1');
-    opts.workerCount = 1;
+    opts.methods = [methods[0]];
 
     await runFactory(opts);
 
-    expect(mockQuery).toHaveBeenCalledTimes(4);
+    expect(mockQuery).toHaveBeenCalledTimes(3);
 
     const divergeRows = await testDb
       .select()
       .from(schema.ideas)
       .where(and(eq(schema.ideas.sessionId, 'sess-edge-1'), eq(schema.ideas.phase, 'diverge')));
 
-    // Only 1 worker x 3 ideas = 3
-    expect(divergeRows).toHaveLength(3);
+    // Only 1 worker x 2 ideas = 2
+    expect(divergeRows).toHaveLength(2);
 
-    // All should be worker-0 with The Engineer persona (first persona)
+    // All should be worker-0 with First Principles method
     for (const row of divergeRows) {
       expect(row.workerId).toBe('worker-0');
-      expect(row.persona).toBe('The Engineer');
+      expect(row.persona).toBe('First Principles');
     }
   });
 
-  // 29. All ideas eliminated in convergence (should still proceed)
+  // 29. All ideas eliminated in convergence
   it('proceeds through evolution and QA even when all ideas eliminated in convergence', async () => {
     await insertSession(testDb, 'sess-edge-2');
 
     const allEliminated = [
       {
-        id: 'scored-1',
-        sourceIds: ['idea-0-1'],
-        name: 'Idea A',
-        description: 'Desc A',
+        id: 'scored-0', sourceIds: ['worker-0-0'], name: 'Idea A', description: 'Desc A',
         gateResults: [
           { gateId: 'g1', pass: false, reason: 'Not feasible' },
           { gateId: 'g2', pass: true, reason: 'OK' },
           { gateId: 'g3', pass: true, reason: 'OK' },
         ],
-        criteriaScores: [],
-        totalScore: 0,
-        eliminated: true,
-        eliminationReason: 'Failed gate g1',
+        criteriaScores: [], totalScore: 0, eliminated: false,
       },
       {
-        id: 'scored-2',
-        sourceIds: ['idea-0-2'],
-        name: 'Idea B',
-        description: 'Desc B',
+        id: 'scored-1', sourceIds: ['worker-0-1'], name: 'Idea B', description: 'Desc B',
         gateResults: [
           { gateId: 'g1', pass: false, reason: 'Not feasible' },
           { gateId: 'g2', pass: true, reason: 'OK' },
           { gateId: 'g3', pass: true, reason: 'OK' },
         ],
-        criteriaScores: [],
-        totalScore: 0,
-        eliminated: true,
-        eliminationReason: 'Failed gate g1',
+        criteriaScores: [], totalScore: 0, eliminated: false,
+      },
+      {
+        id: 'scored-2', sourceIds: ['worker-1-0'], name: 'Idea C', description: 'Desc C',
+        gateResults: [
+          { gateId: 'g1', pass: false, reason: 'Not feasible' },
+          { gateId: 'g2', pass: true, reason: 'OK' },
+          { gateId: 'g3', pass: true, reason: 'OK' },
+        ],
+        criteriaScores: [], totalScore: 0, eliminated: false,
+      },
+      {
+        id: 'scored-3', sourceIds: ['worker-1-1'], name: 'Idea D', description: 'Desc D',
+        gateResults: [
+          { gateId: 'g1', pass: false, reason: 'Not feasible' },
+          { gateId: 'g2', pass: true, reason: 'OK' },
+          { gateId: 'g3', pass: true, reason: 'OK' },
+        ],
+        criteriaScores: [], totalScore: 0, eliminated: false,
       },
     ];
 
-    // Empty evolution result (no survivors to evolve)
-    const emptyEvolved: unknown[] = [];
-    // Empty QA result (nothing to QA)
+    // Empty QA result (no concepts to QA, but QA is still called)
     const emptyQa: unknown[] = [];
 
+    // 2 diverge + 1 converge + 0 evolution (0 survivors, 0 pairs) + 1 QA = 4
     mockQuery
       .mockReturnValueOnce(queryResult(JSON.stringify(worker0Ideas)))
       .mockReturnValueOnce(queryResult(JSON.stringify(worker1Ideas)))
       .mockReturnValueOnce(queryResult(JSON.stringify(allEliminated)))
-      .mockReturnValueOnce(queryResult(JSON.stringify(emptyEvolved)))
       .mockReturnValueOnce(queryResult(JSON.stringify(emptyQa)));
 
     await runFactory(factoryOptions('sess-edge-2'));
 
-    // Pipeline should still complete all 5 calls
-    expect(mockQuery).toHaveBeenCalledTimes(5);
+    expect(mockQuery).toHaveBeenCalledTimes(4);
 
     // All converge ideas should be eliminated
     const convergeRows = await testDb
@@ -847,7 +931,7 @@ describe('Factory – Edge cases', () => {
       .from(schema.ideas)
       .where(and(eq(schema.ideas.sessionId, 'sess-edge-2'), eq(schema.ideas.phase, 'converge')));
 
-    expect(convergeRows).toHaveLength(2);
+    expect(convergeRows).toHaveLength(4);
     for (const row of convergeRows) {
       expect(row.eliminated).toBe(1);
     }
@@ -859,7 +943,7 @@ describe('Factory – Edge cases', () => {
     );
     expect(convergenceEvents).toHaveLength(1);
     expect(convergenceEvents[0][1].data.survivors).toHaveLength(0);
-    expect(convergenceEvents[0][1].data.eliminated).toHaveLength(2);
+    expect(convergenceEvents[0][1].data.eliminated).toHaveLength(4);
   });
 
   // 30. Diverge ideas persist data field as JSON
@@ -884,6 +968,186 @@ describe('Factory – Edge cases', () => {
       expect(data.workerId).toBeDefined();
       expect(data.persona).toBeDefined();
     }
+  });
+});
+
+// ==========================================================================
+// Partial Failure (Promise.allSettled)
+// ==========================================================================
+
+describe('Factory – Partial worker failure', () => {
+  let runFactory: typeof import('./factory.js')['runFactory'];
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    testDb = createTestDb();
+    const mod = await import('./factory.js');
+    runFactory = mod.runFactory;
+  });
+
+  it('proceeds with partial results when one worker fails', async () => {
+    await insertSession(testDb, 'sess-partial-1');
+
+    // Scored results for the 2 ideas from surviving worker 0
+    const partialScored = [
+      {
+        id: 'scored-0', sourceIds: ['worker-0-0'], name: 'Idea A', description: 'Desc A',
+        gateResults: [
+          { gateId: 'g1', pass: true, reason: 'OK' },
+          { gateId: 'g2', pass: true, reason: 'OK' },
+          { gateId: 'g3', pass: true, reason: 'OK' },
+        ],
+        criteriaScores: [
+          { criterionId: 'c1', score: 4, reason: 'Novel' },
+          { criterionId: 'c2', score: 5, reason: 'Buildable' },
+          { criterionId: 'c3', score: 3, reason: 'OK' },
+          { criterionId: 'c4', score: 4, reason: 'OK' },
+          { criterionId: 'c5', score: 3, reason: 'OK' },
+        ],
+        totalScore: 19, eliminated: false,
+      },
+      {
+        id: 'scored-1', sourceIds: ['worker-0-1'], name: 'Idea B', description: 'Desc B',
+        gateResults: [
+          { gateId: 'g1', pass: false, reason: 'Nope' },
+          { gateId: 'g2', pass: true, reason: 'OK' },
+          { gateId: 'g3', pass: true, reason: 'OK' },
+        ],
+        criteriaScores: [], totalScore: 0, eliminated: false,
+      },
+    ];
+
+    const partialQa = [
+      {
+        conceptId: 'scored-0', feasibilityScore: 4,
+        risks: [
+          { category: 'Technical', description: 'Complex', severity: 'medium', mitigation: 'Plan' },
+          { category: 'Market', description: 'Risk', severity: 'low' },
+          { category: 'Cost', description: 'Expensive', severity: 'medium', mitigation: 'Fund' },
+        ],
+        verdict: 'strong', summary: 'Good.',
+      },
+    ];
+
+    // Worker 0 succeeds, Worker 1 fails with auth error (non-retryable)
+    const authError = new Error('401 Unauthorized');
+    // 1 success + 1 fail + 1 converge batch + 0 evolution (1 survivor) + 1 QA = 4
+    mockQuery
+      .mockReturnValueOnce(queryResult(JSON.stringify(worker0Ideas)))
+      .mockImplementationOnce(() => { throw authError; })
+      .mockReturnValueOnce(queryResult(JSON.stringify(partialScored)))
+      .mockReturnValueOnce(queryResult(JSON.stringify(partialQa)));
+
+    await runFactory(factoryOptions('sess-partial-1'));
+
+    // Only worker 0 ideas persisted (2 ideas, not 4)
+    const divergeRows = await testDb
+      .select()
+      .from(schema.ideas)
+      .where(and(eq(schema.ideas.sessionId, 'sess-partial-1'), eq(schema.ideas.phase, 'diverge')));
+    expect(divergeRows).toHaveLength(2);
+
+    // Should emit a partial results thought
+    const partialEvents = mockEmit.mock.calls.filter(
+      ([sid, evt]: [string, { type: string; data: { agent?: string; text?: string } }]) =>
+        sid === 'sess-partial-1' &&
+        evt.type === 'agent:thought' &&
+        evt.data.text?.includes('Proceeding with partial results'),
+    );
+    expect(partialEvents.length).toBeGreaterThanOrEqual(1);
+
+    // Should emit factory:progress events with worker status
+    const progressEvents = mockEmit.mock.calls.filter(
+      ([sid, evt]: [string, { type: string }]) =>
+        sid === 'sess-partial-1' && evt.type === 'factory:progress',
+    );
+    expect(progressEvents.length).toBeGreaterThanOrEqual(1);
+
+    // Pipeline still completes
+    expect(mockQuery).toHaveBeenCalledTimes(4);
+  });
+
+  it('throws when ALL workers fail', async () => {
+    await insertSession(testDb, 'sess-all-fail');
+
+    // Both workers fail with auth errors (non-retryable)
+    const authError = new Error('401 Unauthorized');
+    mockQuery
+      .mockImplementation(() => { throw authError; });
+
+    await expect(runFactory(factoryOptions('sess-all-fail'))).rejects.toThrow(
+      /All 2 workers failed/,
+    );
+
+    // No ideas persisted
+    const divergeRows = await testDb
+      .select()
+      .from(schema.ideas)
+      .where(and(eq(schema.ideas.sessionId, 'sess-all-fail'), eq(schema.ideas.phase, 'diverge')));
+    expect(divergeRows).toHaveLength(0);
+  });
+
+  it('emits failure thought with specific error message for failed worker', async () => {
+    await insertSession(testDb, 'sess-fail-msg');
+
+    const partialScored = [
+      {
+        id: 'scored-0', sourceIds: ['worker-0-0'], name: 'Idea A', description: 'Desc A',
+        gateResults: [
+          { gateId: 'g1', pass: true, reason: 'OK' },
+          { gateId: 'g2', pass: true, reason: 'OK' },
+          { gateId: 'g3', pass: true, reason: 'OK' },
+        ],
+        criteriaScores: [
+          { criterionId: 'c1', score: 4, reason: 'OK' },
+          { criterionId: 'c2', score: 5, reason: 'OK' },
+          { criterionId: 'c3', score: 3, reason: 'OK' },
+          { criterionId: 'c4', score: 4, reason: 'OK' },
+          { criterionId: 'c5', score: 3, reason: 'OK' },
+        ],
+        totalScore: 19, eliminated: false,
+      },
+      {
+        id: 'scored-1', sourceIds: ['worker-0-1'], name: 'Idea B', description: 'Desc B',
+        gateResults: [
+          { gateId: 'g1', pass: false, reason: 'Nope' },
+          { gateId: 'g2', pass: true, reason: 'OK' },
+          { gateId: 'g3', pass: true, reason: 'OK' },
+        ],
+        criteriaScores: [], totalScore: 0, eliminated: false,
+      },
+    ];
+
+    const partialQa = [
+      {
+        conceptId: 'scored-0', feasibilityScore: 4,
+        risks: [
+          { category: 'Technical', description: 'Complex', severity: 'medium', mitigation: 'Plan' },
+          { category: 'Market', description: 'Risk', severity: 'low' },
+          { category: 'Cost', description: 'Expensive', severity: 'medium', mitigation: 'Fund' },
+        ],
+        verdict: 'strong', summary: 'Good.',
+      },
+    ];
+
+    const notFoundError = new Error('404 model unavailable');
+    mockQuery
+      .mockReturnValueOnce(queryResult(JSON.stringify(worker0Ideas)))
+      .mockImplementationOnce(() => { throw notFoundError; })
+      .mockReturnValueOnce(queryResult(JSON.stringify(partialScored)))
+      .mockReturnValueOnce(queryResult(JSON.stringify(partialQa)));
+
+    await runFactory(factoryOptions('sess-fail-msg'));
+
+    // Should emit thought with the specific error for the failed worker
+    const failEvents = mockEmit.mock.calls.filter(
+      ([sid, evt]: [string, { type: string; data: { agent?: string; text?: string } }]) =>
+        sid === 'sess-fail-msg' &&
+        evt.type === 'agent:thought' &&
+        evt.data.text?.includes('Failed:'),
+    );
+    expect(failEvents.length).toBeGreaterThanOrEqual(1);
+    expect(failEvents[0][1].data.text).toContain('model unavailable');
   });
 });
 
@@ -934,11 +1198,11 @@ describe('Factory – SSE event details', () => {
         evt.data.agent === 'Analyst',
     );
 
-    // At least 4 analyst events: converging, convergence complete, evolving, evolution complete, QA running, QA complete
+    // At least 4 analyst events: converging, convergence complete, evolving, evolution complete, QA, QA complete
     expect(analystEvents.length).toBeGreaterThanOrEqual(4);
   });
 
-  // 33. Worker thought events include worker number and persona name
+  // 33. Worker thought events include worker number and method name
   it('emits worker thought events with correct worker identification', async () => {
     await insertSession(testDb, 'sess-sse-3');
     setupFullPipelineMocks();
@@ -956,8 +1220,8 @@ describe('Factory – SSE event details', () => {
     expect(workerEvents.length).toBeGreaterThanOrEqual(4);
 
     const agentNames = workerEvents.map(([, evt]: [string, { data: { agent: string } }]) => evt.data.agent);
-    expect(agentNames.some((name: string) => name.includes('The Engineer'))).toBe(true);
-    expect(agentNames.some((name: string) => name.includes('The Visionary'))).toBe(true);
+    expect(agentNames.some((name: string) => name.includes('First Principles'))).toBe(true);
+    expect(agentNames.some((name: string) => name.includes('TRIZ'))).toBe(true);
   });
 });
 
@@ -976,7 +1240,7 @@ describe('Factory – Model routing', () => {
   });
 
   // 34. Workers use workerModel, analyst phases use analystModel
-  it('routes workerModel to divergence and analystModel to converge/evolve/QA', async () => {
+  it('routes workerModel to divergence and analystModel to converge/evolve/rescore/QA', async () => {
     await insertSession(testDb, 'sess-model-1');
     setupFullPipelineMocks();
 
@@ -990,9 +1254,10 @@ describe('Factory – Model routing', () => {
     expect(mockQuery.mock.calls[0][0].options.model).toBe('claude-haiku-4-20250414');
     expect(mockQuery.mock.calls[1][0].options.model).toBe('claude-haiku-4-20250414');
 
-    // Converge, evolve, QA (calls 2, 3, 4) should use analystModel
+    // Converge, evolution, rescore, QA (calls 2-5) should use analystModel
     expect(mockQuery.mock.calls[2][0].options.model).toBe('claude-sonnet-4-20250514');
     expect(mockQuery.mock.calls[3][0].options.model).toBe('claude-sonnet-4-20250514');
     expect(mockQuery.mock.calls[4][0].options.model).toBe('claude-sonnet-4-20250514');
+    expect(mockQuery.mock.calls[5][0].options.model).toBe('claude-sonnet-4-20250514');
   });
 });

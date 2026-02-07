@@ -18,6 +18,7 @@ interface RunTaxonomyOptions {
   domain: string;
   webSearch: boolean;
   model: string;
+  signal?: AbortSignal;
 }
 
 export async function runTaxonomy(options: RunTaxonomyOptions): Promise<void> {
@@ -25,13 +26,15 @@ export async function runTaxonomy(options: RunTaxonomyOptions): Promise<void> {
 
   sseManager.emit(sessionId, {
     type: 'agent:thought',
-    data: { agent: 'Navigator', text: `Mapping the problem space for: "${domain}"` },
+    data: { agent: 'Navigator', text: `Mapping the problem space for: "${domain}"`, model },
   });
 
   const taxonomy = await callLLMWithRetry(
     {
       model,
       system: SKILL_MD,
+      timeoutMs: 120_000,
+      signal: options.signal,
       prompt: `Generate a comprehensive MECE taxonomy tree for the domain: "${domain}"
 
 Remember:
@@ -41,7 +44,24 @@ Remember:
 - All three probability levels (high, medium, low) represented
 - Full-distribution sampling: include obvious, mainstream, AND niche/speculative categories
 
-Return ONLY the JSON object. No additional text.`,
+You MUST return a JSON object with this recursive structure:
+{
+  "name": "${domain}",
+  "p": "high",
+  "children": [
+    {
+      "name": "Category Name",
+      "p": "high",
+      "children": [
+        { "name": "Subcategory", "p": "medium", "children": [] }
+      ]
+    }
+  ]
+}
+
+Each node has: "name" (string), "p" ("high", "medium", or "low"), and optionally "children" (array of nodes).
+
+Return ONLY the JSON object. No markdown, no code blocks, no extra text.`,
       outputSchema: taxonomyJsonSchema,
       sessionId,
       agentName: 'Navigator',
@@ -68,6 +88,6 @@ Return ONLY the JSON object. No additional text.`,
 
   sseManager.emit(sessionId, {
     type: 'agent:thought',
-    data: { agent: 'Navigator', text: 'Taxonomy generation complete.' },
+    data: { agent: 'Navigator', text: 'Taxonomy generation complete.', model },
   });
 }

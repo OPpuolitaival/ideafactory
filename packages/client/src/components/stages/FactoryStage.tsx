@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useSessionStore } from '../../store/index.js';
 import { trpc } from '../../trpc/index.js';
 
@@ -12,9 +13,34 @@ const PHASE_LABELS = {
 
 const PHASES = ['diverge', 'converge', 'evolve', 'qa'] as const;
 
+function formatElapsed(ms: number): string {
+  const totalSecs = Math.floor(ms / 1000);
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function useElapsedTimer(startedAt: number | null): string | null {
+  const [elapsed, setElapsed] = useState<string | null>(null);
+  useEffect(() => {
+    if (!startedAt) {
+      setElapsed(null);
+      return;
+    }
+    setElapsed(formatElapsed(Date.now() - startedAt));
+    const interval = setInterval(() => {
+      setElapsed(formatElapsed(Date.now() - startedAt));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [startedAt]);
+  return elapsed;
+}
+
 export function FactoryStage() {
   const {
     factoryPhase,
+    factoryProgress,
+    factoryStartedAt,
     workerIdeas,
     scoredIdeas,
     evolvedIdeas,
@@ -23,6 +49,7 @@ export function FactoryStage() {
     setStage,
     setLoading,
   } = useSessionStore();
+  const elapsed = useElapsedTimer(factoryPhase !== 'complete' && factoryPhase !== 'idle' ? factoryStartedAt : null);
 
   const advanceMutation = trpc.session.advance.useMutation();
 
@@ -37,8 +64,15 @@ export function FactoryStage() {
 
   return (
     <div className="max-w-6xl mx-auto">
-      <h2 className="text-2xl font-bold mb-2">Stage 4: Factory</h2>
-      <p className="text-gray-400 mb-6">{PHASE_LABELS[factoryPhase]}</p>
+      <h2 className="text-2xl font-bold mb-2">
+        Stage 4: Factory
+        {elapsed && <span className="text-base font-normal text-gray-500 ml-3">({elapsed} elapsed)</span>}
+      </h2>
+      <p className="text-gray-400 mb-1">{PHASE_LABELS[factoryPhase]}</p>
+      {factoryProgress && (
+        <p className="text-sm text-accent-light mb-6">{factoryProgress.detail}</p>
+      )}
+      {!factoryProgress && <div className="mb-6" />}
 
       {/* Phase Pipeline */}
       <div className="flex items-center gap-2 mb-8">

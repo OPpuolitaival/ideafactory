@@ -5,6 +5,7 @@ import {
   RubricSchema,
   RawIdeaSchema,
   ScoredIdeaSchema,
+  EvolvedConceptSchema,
   QAResultSchema,
   OutputPackageSchema,
   VisualArtifactSchema,
@@ -21,6 +22,7 @@ export const rawIdeaArrayJsonSchema = toJsonSchema(
   z.array(RawIdeaSchema.omit({ workerId: true, persona: true })),
 );
 export const scoredIdeaArrayJsonSchema = toJsonSchema(z.array(ScoredIdeaSchema));
+export const evolvedConceptArrayJsonSchema = toJsonSchema(z.array(EvolvedConceptSchema));
 export const qaResultArrayJsonSchema = toJsonSchema(z.array(QAResultSchema));
 export const outputPackageJsonSchema = toJsonSchema(OutputPackageSchema);
 export const visualArtifactArrayJsonSchema = toJsonSchema(z.array(VisualArtifactSchema));

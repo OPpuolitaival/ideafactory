@@ -6,15 +6,6 @@ export type Stage = z.infer<typeof StageSchema>;
 export const FactoryPhaseSchema = z.enum(['diverge', 'converge', 'evolve', 'qa']);
 export type FactoryPhase = z.infer<typeof FactoryPhaseSchema>;
 
-export const PersonaSchema = z.object({
-  name: z.string(),
-  systemPrompt: z.string(),
-  defaultMethod: z.string().optional(),
-  builtIn: z.boolean().default(true),
-});
-
-export type Persona = z.infer<typeof PersonaSchema>;
-
 export const SessionModelsSchema = z.object({
   navigator: z.string(),
   strategist: z.string(),
@@ -25,10 +16,8 @@ export const SessionModelsSchema = z.object({
 export type SessionModels = z.infer<typeof SessionModelsSchema>;
 
 export const SessionConfigSchema = z.object({
-  workerCount: z.number().min(1).max(5).default(3),
   ideasPerWorker: z.number().min(5).max(30).default(15),
   webSearch: z.boolean().default(false),
-  personas: z.array(z.string()).optional(),
   models: SessionModelsSchema.optional(),
 });
 

@@ -14,11 +14,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createTestDb, type TestDb } from '../__tests__/setup.js';
 import * as schema from '../db/schema.js';
 import { eq } from 'drizzle-orm';
-import {
-  BUILT_IN_METHODS,
-  DEFAULT_PERSONAS,
-  DEFAULT_CONFIG,
-} from '@ideafactory/shared';
+import { BUILT_IN_METHODS, DEFAULT_CONFIG } from '@ideafactory/shared';
 
 const API_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = process.env.IDEAFACTORY_TEST_MODEL ?? 'claude-sonnet-4-20250514';
@@ -347,8 +343,6 @@ e2eDescribe('E2E: Factory (Diverge + Converge + Evolve + QA) [PRD §15.5-7]', ()
       coordinate: 'Chairs > Ergonomic > Standing',
       methods,
       rubric,
-      personas: [DEFAULT_PERSONAS[0]], // The Engineer
-      workerCount: 1,
       ideasPerWorker: 5,
       workerModel: MODEL,
       analystModel: MODEL,
@@ -509,8 +503,6 @@ e2eDescribe('E2E: Full Pipeline [PRD §15.8]', () => {
       coordinate,
       methods: selectedMethods,
       rubric,
-      personas: [DEFAULT_PERSONAS[0]],
-      workerCount: 1,
       ideasPerWorker: 5,
       workerModel: MODEL,
       analystModel: MODEL,
@@ -536,7 +528,6 @@ e2eDescribe('E2E: Full Pipeline [PRD §15.8]', () => {
       domain: 'Future of Urban Transportation',
       coordinate,
       methods: selectedMethods,
-      workerCount: 1,
       ideas: ideas,
       model: MODEL,
     });

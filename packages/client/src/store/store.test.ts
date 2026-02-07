@@ -105,7 +105,7 @@ const outputPackage: OutputPackage = {
     domain: 'Robotics',
     coordinate: 'Manipulation > Grippers',
     methods: ['First Principles', 'TRIZ'],
-    workerCount: 3,
+    methodCount: 3,
     totalIdeasGenerated: 45,
     totalIdeasSurvived: 5,
     duration: 120000,
@@ -123,6 +123,8 @@ beforeEach(() => {
     stage: 'taxonomy',
     isLoading: false,
     error: null,
+    errorStage: null,
+    sseStatus: 'disconnected',
     taxonomy: null,
     selectedPath: [],
     recommendedMethods: [],
@@ -130,6 +132,8 @@ beforeEach(() => {
     selectedMethods: [],
     rubric: null,
     factoryPhase: 'idle',
+    factoryProgress: null,
+    factoryStartedAt: null,
     workerIdeas: new Map(),
     scoredIdeas: [],
     evolvedIdeas: [],
@@ -181,6 +185,22 @@ describe('Basic setters', () => {
     useSessionStore.getState().setError('oops');
     useSessionStore.getState().setError(null);
     expect(useSessionStore.getState().error).toBeNull();
+  });
+
+  it('setSseStatus sets sseStatus', () => {
+    useSessionStore.getState().setSseStatus('connected');
+    expect(useSessionStore.getState().sseStatus).toBe('connected');
+  });
+
+  it('setSseStatus transitions through states', () => {
+    useSessionStore.getState().setSseStatus('connecting');
+    expect(useSessionStore.getState().sseStatus).toBe('connecting');
+    useSessionStore.getState().setSseStatus('connected');
+    expect(useSessionStore.getState().sseStatus).toBe('connected');
+    useSessionStore.getState().setSseStatus('reconnecting');
+    expect(useSessionStore.getState().sseStatus).toBe('reconnecting');
+    useSessionStore.getState().setSseStatus('disconnected');
+    expect(useSessionStore.getState().sseStatus).toBe('disconnected');
   });
 });
 
@@ -523,6 +543,67 @@ describe('handleSSEEvent', () => {
     expect(useSessionStore.getState().outputPackage).toEqual(outputPackage);
   });
 
+  it('factory:progress sets factoryProgress', () => {
+    const event: SSEEvent = {
+      type: 'factory:progress',
+      data: {
+        phase: 'diverge',
+        detail: '2/3 workers complete (30 ideas)',
+        workersTotal: 3,
+        workersDone: 2,
+        workersFailed: 0,
+      },
+    };
+    useSessionStore.getState().handleSSEEvent(event);
+
+    const state = useSessionStore.getState();
+    expect(state.factoryProgress).toEqual({
+      phase: 'diverge',
+      detail: '2/3 workers complete (30 ideas)',
+      workersTotal: 3,
+      workersDone: 2,
+      workersFailed: 0,
+    });
+  });
+
+  it('factory:progress is cleared on data:convergence_result', () => {
+    // Set progress first
+    useSessionStore.getState().handleSSEEvent({
+      type: 'factory:progress',
+      data: { phase: 'converge', detail: 'Scoring 45 ideas...' },
+    } as SSEEvent);
+    expect(useSessionStore.getState().factoryProgress).not.toBeNull();
+
+    // Convergence result clears it
+    useSessionStore.getState().handleSSEEvent({
+      type: 'data:convergence_result',
+      data: { survivors: [scoredIdea], eliminated: [eliminatedIdea] },
+    } as SSEEvent);
+    expect(useSessionStore.getState().factoryProgress).toBeNull();
+  });
+
+  it('status:stage_start with factory sets factoryStartedAt', () => {
+    const before = Date.now();
+    useSessionStore.getState().handleSSEEvent({
+      type: 'status:stage_start',
+      data: { stage: 'factory' },
+    } as SSEEvent);
+    const after = Date.now();
+
+    const startedAt = useSessionStore.getState().factoryStartedAt;
+    expect(startedAt).toBeGreaterThanOrEqual(before);
+    expect(startedAt).toBeLessThanOrEqual(after);
+  });
+
+  it('status:stage_start with non-factory does not set factoryStartedAt', () => {
+    useSessionStore.getState().handleSSEEvent({
+      type: 'status:stage_start',
+      data: { stage: 'taxonomy' },
+    } as SSEEvent);
+
+    expect(useSessionStore.getState().factoryStartedAt).toBeNull();
+  });
+
   it('status:stage_complete with factory stage sets factoryPhase to complete and adds checkpoint', () => {
     useSessionStore.setState({ factoryPhase: 'qa' });
 
@@ -572,7 +653,7 @@ describe('handleSSEEvent', () => {
     expect(thoughts[0].text).toBe('Taxonomy complete');
   });
 
-  it('status:error sets error and clears isLoading', () => {
+  it('status:error sets error, errorStage, and clears isLoading', () => {
     useSessionStore.setState({ isLoading: true });
 
     const event: SSEEvent = {
@@ -583,7 +664,45 @@ describe('handleSSEEvent', () => {
 
     const state = useSessionStore.getState();
     expect(state.error).toBe('LLM timeout');
+    expect(state.errorStage).toBe('taxonomy');
     expect(state.isLoading).toBe(false);
+  });
+
+  it('status:error clears factoryProgress, factoryStartedAt, and factoryPhase', () => {
+    useSessionStore.setState({
+      isLoading: true,
+      factoryPhase: 'converge',
+      factoryProgress: { detail: 'Scoring 45 ideas...' },
+      factoryStartedAt: Date.now(),
+    });
+
+    useSessionStore.getState().handleSSEEvent({
+      type: 'status:error',
+      data: { stage: 'factory', error: 'Worker timeout' },
+    } as SSEEvent);
+
+    const state = useSessionStore.getState();
+    expect(state.factoryProgress).toBeNull();
+    expect(state.factoryStartedAt).toBeNull();
+    expect(state.factoryPhase).toBe('idle');
+  });
+
+  it('status:stage_start sets isLoading and clears error/errorStage', () => {
+    useSessionStore.setState({ isLoading: false, error: 'old error', errorStage: 'taxonomy' });
+
+    const event: SSEEvent = {
+      type: 'status:stage_start',
+      data: { stage: 'methods' },
+    };
+    useSessionStore.getState().handleSSEEvent(event);
+
+    const state = useSessionStore.getState();
+    expect(state.isLoading).toBe(true);
+    expect(state.error).toBeNull();
+    expect(state.errorStage).toBeNull();
+    expect(state.thoughts).toHaveLength(1);
+    expect(state.thoughts[0].agent).toBe('system');
+    expect(state.thoughts[0].text).toBe('Starting methods stage...');
   });
 });
 
@@ -600,6 +719,8 @@ describe('reset', () => {
       stage: 'factory',
       isLoading: true,
       error: 'some error',
+      errorStage: 'factory',
+      sseStatus: 'connected',
       taxonomy: taxonomyNode,
       selectedPath: ['Root', 'Child'],
       recommendedMethods: [1, 3],
@@ -622,6 +743,8 @@ describe('reset', () => {
     expect(state.stage).toBe('taxonomy');
     expect(state.isLoading).toBe(false);
     expect(state.error).toBeNull();
+    expect(state.errorStage).toBeNull();
+    expect(state.sseStatus).toBe('disconnected');
     expect(state.taxonomy).toBeNull();
     expect(state.selectedPath).toEqual([]);
     expect(state.recommendedMethods).toEqual([]);
@@ -629,6 +752,8 @@ describe('reset', () => {
     expect(state.selectedMethods).toEqual([]);
     expect(state.rubric).toBeNull();
     expect(state.factoryPhase).toBe('idle');
+    expect(state.factoryProgress).toBeNull();
+    expect(state.factoryStartedAt).toBeNull();
     expect(state.workerIdeas.size).toBe(0);
     expect(state.scoredIdeas).toEqual([]);
     expect(state.evolvedIdeas).toEqual([]);
@@ -774,6 +899,7 @@ describe('clearDownstreamState', () => {
     expect(s.thoughts).toEqual([]);
     expect(s.isLoading).toBe(false);
     expect(s.error).toBeNull();
+    expect(s.errorStage).toBeNull();
     expect(s.stageModels).toEqual({});
   });
 
@@ -826,6 +952,16 @@ describe('clearDownstreamState', () => {
     const s = useSessionStore.getState();
     expect(s.sessionId).toBe('sess-1');
     expect(s.domain).toBe('Robotics');
+  });
+
+  it('taxonomy survives clearDownstreamState followed by hydrateFromSession with stale cache', () => {
+    useSessionStore.getState().clearDownstreamState('taxonomy');
+
+    // Verify taxonomy is preserved after clearDownstreamState
+    const afterClear = useSessionStore.getState();
+    expect(afterClear.stage).toBe('taxonomy');
+    expect(afterClear.taxonomy).toEqual(taxonomyNode);
+    expect(afterClear.selectedPath).toEqual([]);
   });
 });
 

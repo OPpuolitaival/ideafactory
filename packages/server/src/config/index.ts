@@ -2,14 +2,13 @@ import fs from 'fs';
 import path from 'path';
 import YAML from 'yaml';
 import { z } from 'zod';
-import { DEFAULT_CONFIG, BUILT_IN_METHODS, DEFAULT_PERSONAS } from '@ideafactory/shared';
-import type { Method, Persona } from '@ideafactory/shared';
-import { getConfigPath, getMethodsDir, getPersonasDir } from './paths.js';
+import { DEFAULT_CONFIG, BUILT_IN_METHODS } from '@ideafactory/shared';
+import type { Method } from '@ideafactory/shared';
+import { getConfigPath, getMethodsDir } from './paths.js';
 
 const UserConfigSchema = z.object({
   defaults: z
     .object({
-      workerCount: z.number().min(1).max(5).optional(),
       ideasPerWorker: z.number().min(5).max(30).optional(),
       webSearch: z.boolean().optional(),
     })
@@ -34,7 +33,6 @@ export type UserConfig = z.infer<typeof UserConfigSchema>;
 
 export interface AppConfig {
   defaults: {
-    workerCount: number;
     ideasPerWorker: number;
     webSearch: boolean;
   };
@@ -70,7 +68,6 @@ export function loadConfig(): AppConfig {
 
   cachedConfig = {
     defaults: {
-      workerCount: userConfig.defaults?.workerCount ?? DEFAULT_CONFIG.workerCount,
       ideasPerWorker: userConfig.defaults?.ideasPerWorker ?? DEFAULT_CONFIG.ideasPerWorker,
       webSearch: userConfig.defaults?.webSearch ?? DEFAULT_CONFIG.webSearch,
     },
@@ -120,41 +117,8 @@ export function loadUserMethods(): Method[] {
   return methods;
 }
 
-export function loadUserPersonas(): Persona[] {
-  const dir = getPersonasDir();
-  if (!fs.existsSync(dir)) return [];
-
-  const personas: Persona[] = [];
-
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.yaml') || f.endsWith('.yml') || f.endsWith('.json'));
-
-  for (const file of files) {
-    try {
-      const raw = fs.readFileSync(path.join(dir, file), 'utf-8');
-      const parsed = file.endsWith('.json') ? JSON.parse(raw) : YAML.parse(raw);
-
-      if (parsed.name && parsed.systemPrompt) {
-        personas.push({
-          name: parsed.name,
-          systemPrompt: parsed.systemPrompt,
-          defaultMethod: parsed.defaultMethod,
-          builtIn: false,
-        });
-      }
-    } catch (e) {
-      console.warn(`Warning: Skipping malformed persona file ${file}:`, e);
-    }
-  }
-
-  return personas;
-}
-
 export function getAllMethods(): Method[] {
   return [...BUILT_IN_METHODS, ...loadUserMethods()];
-}
-
-export function getAllPersonas(): Persona[] {
-  return [...DEFAULT_PERSONAS, ...loadUserPersonas()];
 }
 
 export function resetConfigCache(): void {

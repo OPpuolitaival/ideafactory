@@ -8,13 +8,11 @@ import { OutputPackageSchema, VisualArtifactSchema } from './output.js';
 import {
   StageSchema,
   FactoryPhaseSchema,
-  PersonaSchema,
   SessionConfigSchema,
   SessionSchema,
 } from './session.js';
 import {
   BUILT_IN_METHODS,
-  DEFAULT_PERSONAS,
   STAGE_ORDER,
 } from '../constants.js';
 
@@ -554,7 +552,7 @@ describe('OutputPackageSchema', () => {
       domain: 'Consumer electronics',
       coordinate: 'Portable speaker',
       methods: ['First Principles', 'Biomimicry'],
-      workerCount: 3,
+      methodCount: 3,
       totalIdeasGenerated: 45,
       totalIdeasSurvived: 5,
       duration: 120000,
@@ -597,8 +595,8 @@ describe('OutputPackageSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it('validates sessionMetadata completeness - rejects missing workerCount', () => {
-    const { workerCount, ...metaRest } = validOutput.sessionMetadata;
+  it('validates sessionMetadata completeness - rejects missing methodCount', () => {
+    const { methodCount, ...metaRest } = validOutput.sessionMetadata;
     const output = { ...validOutput, sessionMetadata: metaRest };
     const result = OutputPackageSchema.safeParse(output);
     expect(result.success).toBe(false);
@@ -692,10 +690,8 @@ describe('VisualArtifactSchema', () => {
 describe('SessionConfigSchema', () => {
   it('accepts a valid config', () => {
     const config = {
-      workerCount: 3,
       ideasPerWorker: 15,
       webSearch: false,
-      personas: ['The Engineer'],
     };
     const result = SessionConfigSchema.safeParse(config);
     expect(result.success).toBe(true);
@@ -705,30 +701,9 @@ describe('SessionConfigSchema', () => {
     const result = SessionConfigSchema.safeParse({});
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.workerCount).toBe(3);
       expect(result.data.ideasPerWorker).toBe(15);
       expect(result.data.webSearch).toBe(false);
     }
-  });
-
-  it('accepts workerCount at lower bound (1)', () => {
-    const result = SessionConfigSchema.safeParse({ workerCount: 1 });
-    expect(result.success).toBe(true);
-  });
-
-  it('accepts workerCount at upper bound (5)', () => {
-    const result = SessionConfigSchema.safeParse({ workerCount: 5 });
-    expect(result.success).toBe(true);
-  });
-
-  it('rejects workerCount of 0 (below minimum)', () => {
-    const result = SessionConfigSchema.safeParse({ workerCount: 0 });
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects workerCount of 6 (above maximum)', () => {
-    const result = SessionConfigSchema.safeParse({ workerCount: 6 });
-    expect(result.success).toBe(false);
   });
 
   it('accepts ideasPerWorker at lower bound (5)', () => {
@@ -749,24 +724,6 @@ describe('SessionConfigSchema', () => {
   it('rejects ideasPerWorker above maximum (31)', () => {
     const result = SessionConfigSchema.safeParse({ ideasPerWorker: 31 });
     expect(result.success).toBe(false);
-  });
-
-  it('accepts optional personas field', () => {
-    const result = SessionConfigSchema.safeParse({});
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.personas).toBeUndefined();
-    }
-  });
-
-  it('accepts personas as an array of strings', () => {
-    const result = SessionConfigSchema.safeParse({
-      personas: ['The Engineer', 'The Visionary'],
-    });
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.personas).toEqual(['The Engineer', 'The Visionary']);
-    }
   });
 
   it('accepts optional models field with all roles', () => {
@@ -791,7 +748,6 @@ describe('SessionConfigSchema', () => {
 
   it('accepts config without models field', () => {
     const result = SessionConfigSchema.safeParse({
-      workerCount: 3,
       ideasPerWorker: 15,
     });
     expect(result.success).toBe(true);
@@ -855,59 +811,6 @@ describe('FactoryPhaseSchema', () => {
 });
 
 // ---------------------------------------------------------------------------
-// PersonaSchema
-// ---------------------------------------------------------------------------
-describe('PersonaSchema', () => {
-  it('accepts a valid persona with all fields', () => {
-    const persona = {
-      name: 'The Hacker',
-      systemPrompt: 'You hack things together fast.',
-      defaultMethod: 'First Principles',
-      builtIn: false,
-    };
-    const result = PersonaSchema.safeParse(persona);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.builtIn).toBe(false);
-    }
-  });
-
-  it('defaults builtIn to true when omitted', () => {
-    const persona = {
-      name: 'The Hacker',
-      systemPrompt: 'You hack things together fast.',
-    };
-    const result = PersonaSchema.safeParse(persona);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.builtIn).toBe(true);
-    }
-  });
-
-  it('treats defaultMethod as optional', () => {
-    const persona = {
-      name: 'The Hacker',
-      systemPrompt: 'You hack things together fast.',
-    };
-    const result = PersonaSchema.safeParse(persona);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.defaultMethod).toBeUndefined();
-    }
-  });
-
-  it('rejects missing name', () => {
-    const result = PersonaSchema.safeParse({ systemPrompt: 'Prompt text' });
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects missing systemPrompt', () => {
-    const result = PersonaSchema.safeParse({ name: 'The Hacker' });
-    expect(result.success).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // SessionSchema
 // ---------------------------------------------------------------------------
 describe('SessionSchema', () => {
@@ -919,7 +822,6 @@ describe('SessionSchema', () => {
     createdAt: Date.now(),
     updatedAt: Date.now(),
     config: {
-      workerCount: 3,
       ideasPerWorker: 15,
       webSearch: false,
     },
@@ -942,7 +844,7 @@ describe('SessionSchema', () => {
   it('validates nested config schema', () => {
     const session = {
       ...validSession,
-      config: { workerCount: 0 }, // invalid
+      config: { ideasPerWorker: 0 }, // invalid
     };
     const result = SessionSchema.safeParse(session);
     expect(result.success).toBe(false);
@@ -979,22 +881,6 @@ describe('Constants', () => {
   it('BUILT_IN_METHODS ids are unique and sequential 1-10', () => {
     const ids = BUILT_IN_METHODS.map((m) => m.id);
     expect(ids).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-  });
-
-  it('DEFAULT_PERSONAS has exactly 3 entries', () => {
-    expect(DEFAULT_PERSONAS).toHaveLength(3);
-  });
-
-  it('every DEFAULT_PERSONAS entry validates against PersonaSchema', () => {
-    for (const persona of DEFAULT_PERSONAS) {
-      const result = PersonaSchema.safeParse(persona);
-      expect(result.success).toBe(true);
-    }
-  });
-
-  it('DEFAULT_PERSONAS names are The Engineer, The Visionary, The Anthropologist', () => {
-    const names = DEFAULT_PERSONAS.map((p) => p.name);
-    expect(names).toEqual(['The Engineer', 'The Visionary', 'The Anthropologist']);
   });
 
   it('STAGE_ORDER has correct sequence', () => {
