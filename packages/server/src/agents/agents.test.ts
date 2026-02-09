@@ -609,31 +609,45 @@ describe('callLLMWithRetry', () => {
 });
 
 // ==========================================================================
-// 3. Navigator – runTaxonomy
+// 3. Navigator – runTaxonomy (two-phase: skeleton + branch expansion)
 // ==========================================================================
 
 describe('Navigator – runTaxonomy', () => {
   let runTaxonomy: typeof import('./navigator.js')['runTaxonomy'];
 
-  const validTaxonomy = {
+  // Skeleton: top-level categories with empty children
+  const skeleton = {
     name: 'Root',
     p: 'high',
     children: [
-      {
-        name: 'Category A',
-        p: 'high',
-        children: [
-          { name: 'Subcategory A1', p: 'medium' },
-          { name: 'Subcategory A2', p: 'low' },
-        ],
-      },
-      {
-        name: 'Category B',
-        p: 'medium',
-        children: [{ name: 'Subcategory B1', p: 'high' }],
-      },
+      { name: 'Category A', p: 'high', children: [] },
+      { name: 'Category B', p: 'medium', children: [] },
     ],
   };
+
+  // Expanded branches
+  const expandedA = {
+    name: 'Category A',
+    p: 'high',
+    children: [
+      { name: 'Subcategory A1', p: 'medium' },
+      { name: 'Subcategory A2', p: 'low' },
+    ],
+  };
+
+  const expandedB = {
+    name: 'Category B',
+    p: 'medium',
+    children: [{ name: 'Subcategory B1', p: 'high' }],
+  };
+
+  /** Mock skeleton + all branch expansions */
+  function mockSkeletonAndBranches(skel = skeleton, branches = [expandedA, expandedB]) {
+    mockQuery.mockReturnValueOnce(queryResult(JSON.stringify(skel)));
+    for (const branch of branches) {
+      mockQuery.mockReturnValueOnce(queryResult(JSON.stringify(branch)));
+    }
+  }
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -642,11 +656,9 @@ describe('Navigator – runTaxonomy', () => {
     runTaxonomy = mod.runTaxonomy;
   });
 
-  it('persists taxonomy to database on valid LLM response', async () => {
+  it('persists assembled taxonomy (skeleton + branches) to database', async () => {
     await insertSession(testDb, 'sess-nav');
-    mockQuery.mockReturnValueOnce(
-      queryResult(JSON.stringify(validTaxonomy)),
-    );
+    mockSkeletonAndBranches();
 
     await runTaxonomy({
       sessionId: 'sess-nav',
@@ -664,11 +676,16 @@ describe('Navigator – runTaxonomy', () => {
     const stored = JSON.parse(row.tree);
     expect(stored.name).toBe('Root');
     expect(stored.children).toHaveLength(2);
+    // Verify branches were expanded (not empty)
+    expect(stored.children[0].children).toHaveLength(2);
+    expect(stored.children[0].children[0].name).toBe('Subcategory A1');
+    expect(stored.children[1].children).toHaveLength(1);
+    expect(stored.children[1].children[0].name).toBe('Subcategory B1');
   });
 
-  it('validates taxonomy against TaxonomyNodeSchema', async () => {
+  it('validates skeleton against TaxonomyNodeSchema', async () => {
     await insertSession(testDb, 'sess-invalid-tax');
-    // Missing required "p" field
+    // Missing required "p" field on skeleton
     mockQuery.mockReturnValue(
       queryResult(JSON.stringify({ name: 'Root', children: [] })),
     );
@@ -683,11 +700,9 @@ describe('Navigator – runTaxonomy', () => {
     ).rejects.toThrow();
   });
 
-  it('emits SSE events for taxonomy updates', async () => {
+  it('emits progressive SSE taxonomy updates (skeleton + final)', async () => {
     await insertSession(testDb, 'sess-sse-tax');
-    mockQuery.mockReturnValueOnce(
-      queryResult(JSON.stringify(validTaxonomy)),
-    );
+    mockSkeletonAndBranches();
 
     await runTaxonomy({
       sessionId: 'sess-sse-tax',
@@ -696,12 +711,170 @@ describe('Navigator – runTaxonomy', () => {
       model: 'claude-haiku-4-20250414',
     });
 
-    const events = mockEmit.mock.calls
-      .filter(([sid]: [string]) => sid === 'sess-sse-tax')
-      .map(([, evt]: [string, { type: string }]) => evt.type);
+    const taxonomyEvents = mockEmit.mock.calls
+      .filter(
+        ([sid, evt]: [string, { type: string }]) =>
+          sid === 'sess-sse-tax' && evt.type === 'data:taxonomy_update',
+      );
 
-    expect(events).toContain('agent:thought');
-    expect(events).toContain('data:taxonomy_update');
+    // At least 2 taxonomy updates: skeleton + final assembled tree
+    expect(taxonomyEvents.length).toBeGreaterThanOrEqual(2);
+
+    // First update is skeleton (children with empty arrays)
+    const firstTree = taxonomyEvents[0][1].data;
+    expect(firstTree.children[0].children).toHaveLength(0);
+
+    // Last update is the assembled tree (children have subcategories)
+    const lastTree = taxonomyEvents[taxonomyEvents.length - 1][1].data;
+    expect(lastTree.children[0].children.length).toBeGreaterThan(0);
+  });
+
+  it('makes separate LLM calls for skeleton and each branch', async () => {
+    await insertSession(testDb, 'sess-calls');
+    mockSkeletonAndBranches();
+
+    await runTaxonomy({
+      sessionId: 'sess-calls',
+      domain: 'test domain',
+      webSearch: false,
+      model: 'claude-haiku-4-20250414',
+    });
+
+    // 1 skeleton call + 2 branch expansion calls = 3 total
+    expect(mockQuery).toHaveBeenCalledTimes(3);
+  });
+
+  it('succeeds when some branches fail (above 50% threshold)', async () => {
+    // 4 top-level categories, 2 will fail → 50% success, should pass
+    const bigSkeleton = {
+      name: 'Root',
+      p: 'high',
+      children: [
+        { name: 'Cat A', p: 'high', children: [] },
+        { name: 'Cat B', p: 'medium', children: [] },
+        { name: 'Cat C', p: 'low', children: [] },
+        { name: 'Cat D', p: 'medium', children: [] },
+      ],
+    };
+
+    await insertSession(testDb, 'sess-partial');
+    mockQuery
+      // Skeleton
+      .mockReturnValueOnce(queryResult(JSON.stringify(bigSkeleton)))
+      // Branch A succeeds
+      .mockReturnValueOnce(
+        queryResult(JSON.stringify({ name: 'Cat A', p: 'high', children: [{ name: 'A1', p: 'high' }] })),
+      )
+      // Branch B succeeds
+      .mockReturnValueOnce(
+        queryResult(JSON.stringify({ name: 'Cat B', p: 'medium', children: [{ name: 'B1', p: 'medium' }] })),
+      )
+      // Branch C fails (all retries)
+      .mockReturnValue(queryResult('not valid json {{{'));
+
+    await runTaxonomy({
+      sessionId: 'sess-partial',
+      domain: 'test',
+      webSearch: false,
+      model: 'model',
+    });
+
+    const [row] = await testDb
+      .select()
+      .from(schema.taxonomyTrees)
+      .where(eq(schema.taxonomyTrees.sessionId, 'sess-partial'));
+
+    const stored = JSON.parse(row.tree);
+    // Cat A and B have children, C and D stayed as leaves
+    expect(stored.children[0].children.length).toBeGreaterThan(0);
+    expect(stored.children[1].children.length).toBeGreaterThan(0);
+  });
+
+  it('throws when too many branches fail (below 50% threshold)', async () => {
+    const bigSkeleton = {
+      name: 'Root',
+      p: 'high',
+      children: [
+        { name: 'Cat A', p: 'high', children: [] },
+        { name: 'Cat B', p: 'medium', children: [] },
+        { name: 'Cat C', p: 'low', children: [] },
+        { name: 'Cat D', p: 'medium', children: [] },
+      ],
+    };
+
+    await insertSession(testDb, 'sess-all-fail');
+    mockQuery
+      // Skeleton succeeds
+      .mockReturnValueOnce(queryResult(JSON.stringify(bigSkeleton)))
+      // All branches fail
+      .mockReturnValue(queryResult('not valid json {{{'));
+
+    await expect(
+      runTaxonomy({
+        sessionId: 'sess-all-fail',
+        domain: 'test',
+        webSearch: false,
+        model: 'model',
+      }),
+    ).rejects.toThrow(/branch expansion failed/i);
+  });
+
+  it('throws when skeleton has no top-level categories', async () => {
+    await insertSession(testDb, 'sess-empty');
+    const emptySkeleton = { name: 'Root', p: 'high', children: [] };
+    mockQuery.mockReturnValueOnce(queryResult(JSON.stringify(emptySkeleton)));
+
+    await expect(
+      runTaxonomy({
+        sessionId: 'sess-empty',
+        domain: 'test',
+        webSearch: false,
+        model: 'model',
+      }),
+    ).rejects.toThrow(/no top-level categories/i);
+  });
+
+  it('emits thought events with correct agent name "Navigator"', async () => {
+    await insertSession(testDb, 'sess-agent-name');
+    mockSkeletonAndBranches();
+
+    await runTaxonomy({
+      sessionId: 'sess-agent-name',
+      domain: 'test',
+      webSearch: false,
+      model: 'model',
+    });
+
+    const navigatorEvents = mockEmit.mock.calls.filter(
+      ([sid, evt]: [string, { type: string; data: { agent?: string } }]) =>
+        sid === 'sess-agent-name' &&
+        evt.type === 'agent:thought' &&
+        evt.data.agent === 'Navigator',
+    );
+    expect(navigatorEvents.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('emits "Expanding branch X/Y" thought for each branch', async () => {
+    await insertSession(testDb, 'sess-expand-thoughts');
+    mockSkeletonAndBranches();
+
+    await runTaxonomy({
+      sessionId: 'sess-expand-thoughts',
+      domain: 'test',
+      webSearch: false,
+      model: 'model',
+    });
+
+    const expandEvents = mockEmit.mock.calls.filter(
+      ([sid, evt]: [string, { type: string; data: { text: string } }]) =>
+        sid === 'sess-expand-thoughts' &&
+        evt.type === 'agent:thought' &&
+        /Expanding branch \d+\/\d+/.test(evt.data.text),
+    );
+    // One per top-level category
+    expect(expandEvents).toHaveLength(2);
+    expect(expandEvents[0][1].data.text).toContain('1/2');
+    expect(expandEvents[1][1].data.text).toContain('2/2');
   });
 });
 
@@ -1123,12 +1296,22 @@ describe('Navigator – edge cases', () => {
     runTaxonomy = mod.runTaxonomy;
   });
 
-  it('handles taxonomy returned inside code block', async () => {
+  it('handles skeleton returned inside code block', async () => {
     await insertSession(testDb, 'sess-cb');
-    const taxonomy = { name: 'Root', p: 'high', children: [] };
-    mockQuery.mockReturnValueOnce(
-      queryResult('```json\n' + JSON.stringify(taxonomy) + '\n```'),
-    );
+    const skeleton = {
+      name: 'Root',
+      p: 'high',
+      children: [{ name: 'Cat A', p: 'high', children: [] }],
+    };
+    const expanded = {
+      name: 'Cat A',
+      p: 'high',
+      children: [{ name: 'Sub A1', p: 'medium' }],
+    };
+    // Skeleton returned in a code block
+    mockQuery
+      .mockReturnValueOnce(queryResult('```json\n' + JSON.stringify(skeleton) + '\n```'))
+      .mockReturnValueOnce(queryResult(JSON.stringify(expanded)));
 
     await runTaxonomy({
       sessionId: 'sess-cb',
@@ -1143,27 +1326,48 @@ describe('Navigator – edge cases', () => {
       .where(eq(schema.taxonomyTrees.sessionId, 'sess-cb'));
     expect(row).toBeDefined();
     expect(JSON.parse(row.tree).name).toBe('Root');
+    expect(JSON.parse(row.tree).children[0].children[0].name).toBe('Sub A1');
   });
 
-  it('emits thought events with correct agent name "Navigator"', async () => {
-    await insertSession(testDb, 'sess-agent-name');
-    const taxonomy = { name: 'Root', p: 'high', children: [] };
-    mockQuery.mockReturnValueOnce(queryResult(JSON.stringify(taxonomy)));
+  it('failed branches stay as leaf nodes in assembled tree', async () => {
+    await insertSession(testDb, 'sess-leaf');
+    const skeleton = {
+      name: 'Root',
+      p: 'high',
+      children: [
+        { name: 'Good', p: 'high', children: [] },
+        { name: 'Bad', p: 'medium', children: [] },
+      ],
+    };
+    const expandedGood = {
+      name: 'Good',
+      p: 'high',
+      children: [{ name: 'G1', p: 'high' }],
+    };
+
+    mockQuery
+      .mockReturnValueOnce(queryResult(JSON.stringify(skeleton)))
+      .mockReturnValueOnce(queryResult(JSON.stringify(expandedGood)))
+      // Bad branch fails
+      .mockReturnValue(queryResult('invalid json {{'));
 
     await runTaxonomy({
-      sessionId: 'sess-agent-name',
+      sessionId: 'sess-leaf',
       domain: 'test',
       webSearch: false,
       model: 'model',
     });
 
-    const navigatorEvents = mockEmit.mock.calls.filter(
-      ([sid, evt]: [string, { type: string; data: { agent?: string } }]) =>
-        sid === 'sess-agent-name' &&
-        evt.type === 'agent:thought' &&
-        evt.data.agent === 'Navigator',
-    );
-    expect(navigatorEvents.length).toBeGreaterThanOrEqual(1);
+    const [row] = await testDb
+      .select()
+      .from(schema.taxonomyTrees)
+      .where(eq(schema.taxonomyTrees.sessionId, 'sess-leaf'));
+
+    const stored = JSON.parse(row.tree);
+    // Good branch has children
+    expect(stored.children[0].children).toHaveLength(1);
+    // Bad branch stays as leaf (empty children from skeleton)
+    expect(stored.children[1].children).toHaveLength(0);
   });
 });
 

@@ -60,6 +60,13 @@ export function TaxonomyStage({ readOnly }: { readOnly?: boolean } = {}) {
         />
       </div>
 
+      {isLoading && taxonomy && (
+        <div className="mb-4 flex items-center gap-2 text-sm text-gray-400">
+          <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-500 border-t-accent" />
+          Expanding taxonomy branches...
+        </div>
+      )}
+
       {taxonomy && (
         <div className="card">
           <TaxonomyTree

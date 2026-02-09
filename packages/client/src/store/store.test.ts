@@ -420,7 +420,7 @@ describe('handleSSEEvent', () => {
     expect(thoughts[0].text).toBe('Using tool: web_search');
   });
 
-  it('data:taxonomy_update sets taxonomy and clears isLoading', () => {
+  it('data:taxonomy_update sets taxonomy but keeps isLoading (cleared by stage_complete)', () => {
     useSessionStore.setState({ isLoading: true });
 
     const event: SSEEvent = {
@@ -431,7 +431,8 @@ describe('handleSSEEvent', () => {
 
     const state = useSessionStore.getState();
     expect(state.taxonomy).toEqual(taxonomyNode);
-    expect(state.isLoading).toBe(false);
+    // isLoading stays true during progressive taxonomy updates
+    expect(state.isLoading).toBe(true);
   });
 
   it('data:methods_recommended sets recommendations and selectedMethods', () => {

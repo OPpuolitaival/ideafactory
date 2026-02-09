@@ -401,7 +401,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         store.addThought(event.data.agent, `Using tool: ${event.data.tool}`, event.data.model);
         break;
       case 'data:taxonomy_update':
-        set({ taxonomy: event.data, isLoading: false });
+        set({ taxonomy: event.data });
         break;
       case 'data:methods_recommended':
         store.setMethodRecommendations(event.data.recommended, event.data.reasoning);
@@ -442,7 +442,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         set({ factoryProgress: event.data });
         break;
       case 'status:stage_complete': {
-        set({ factoryPhase: event.data.stage === 'factory' ? 'complete' : get().factoryPhase });
+        set({ isLoading: false, factoryPhase: event.data.stage === 'factory' ? 'complete' : get().factoryPhase });
         // Infer model from last thought with a model field
         const thoughts = get().thoughts;
         const lastModelThought = [...thoughts].reverse().find((t) => t.model);

@@ -81,37 +81,44 @@ function queryResult(text: string, structured?: unknown) {
   };
 }
 
-// Stage 1: Taxonomy
-const taxonomyTree = {
+// Stage 1: Taxonomy — skeleton (top-level only, empty children)
+const taxonomySkeleton = {
   name: 'Sustainable Urban Mobility',
   p: 'high' as const,
   children: [
-    {
-      name: 'Electric Vehicles',
-      p: 'high' as const,
-      children: [
-        { name: 'Personal EVs', p: 'high' as const },
-        { name: 'Commercial EVs', p: 'medium' as const },
-      ],
-    },
-    {
-      name: 'Micro-mobility',
-      p: 'medium' as const,
-      children: [
-        { name: 'E-scooters', p: 'high' as const },
-        { name: 'E-bikes', p: 'medium' as const },
-      ],
-    },
-    {
-      name: 'Autonomous Transit',
-      p: 'low' as const,
-      children: [
-        { name: 'Robo-taxis', p: 'low' as const },
-        { name: 'Drone delivery', p: 'low' as const },
-      ],
-    },
+    { name: 'Electric Vehicles', p: 'high' as const, children: [] },
+    { name: 'Micro-mobility', p: 'medium' as const, children: [] },
+    { name: 'Autonomous Transit', p: 'low' as const, children: [] },
   ],
 };
+
+// Stage 1: Taxonomy — expanded branches
+const expandedBranches = [
+  {
+    name: 'Electric Vehicles',
+    p: 'high' as const,
+    children: [
+      { name: 'Personal EVs', p: 'high' as const },
+      { name: 'Commercial EVs', p: 'medium' as const },
+    ],
+  },
+  {
+    name: 'Micro-mobility',
+    p: 'medium' as const,
+    children: [
+      { name: 'E-scooters', p: 'high' as const },
+      { name: 'E-bikes', p: 'medium' as const },
+    ],
+  },
+  {
+    name: 'Autonomous Transit',
+    p: 'low' as const,
+    children: [
+      { name: 'Robo-taxis', p: 'low' as const },
+      { name: 'Drone delivery', p: 'low' as const },
+    ],
+  },
+];
 
 // Stage 2: Method Selection (recommends 2 of 3 available methods)
 const methodRecommendation = {
@@ -241,14 +248,18 @@ const rescoredEvolved = [
 
 // ---------------------------------------------------------------------------
 // Setup mock responses in order:
-// taxonomy(1) + methods(1) + rubric(1) + factory(5) = 8 calls
+// taxonomy(4: 1 skeleton + 3 branches) + methods(1) + rubric(1) + factory(5) = 11 calls
 // Factory: 2 diverge + 1 converge batch + 1 evolution + 1 rescore = 5
 // ---------------------------------------------------------------------------
 
 function setupAllMocks() {
   mockQuery
-    // Stage 1: Taxonomy
-    .mockReturnValueOnce(queryResult(JSON.stringify(taxonomyTree)))
+    // Stage 1: Taxonomy skeleton
+    .mockReturnValueOnce(queryResult(JSON.stringify(taxonomySkeleton)))
+    // Stage 1: Taxonomy branch expansions (3 branches)
+    .mockReturnValueOnce(queryResult(JSON.stringify(expandedBranches[0])))
+    .mockReturnValueOnce(queryResult(JSON.stringify(expandedBranches[1])))
+    .mockReturnValueOnce(queryResult(JSON.stringify(expandedBranches[2])))
     // Stage 2: Methods
     .mockReturnValueOnce(queryResult(JSON.stringify(methodRecommendation)))
     // Stage 3: Rubric
@@ -319,9 +330,9 @@ describe('Integration – Full Pipeline end-to-end', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 2. Makes exactly 8 LLM calls across all stages
+  // 2. Makes exactly 11 LLM calls across all stages
   // -----------------------------------------------------------------------
-  it('makes exactly 8 LLM calls across all stages', async () => {
+  it('makes exactly 11 LLM calls across all stages', async () => {
     setupAllMocks();
 
     await runPipeline(SESSION_ID, 'taxonomy');
@@ -329,8 +340,8 @@ describe('Integration – Full Pipeline end-to-end', () => {
     await runPipeline(SESSION_ID, 'rubric');
     await runPipeline(SESSION_ID, 'factory');
 
-    // taxonomy=1, methods=1, rubric=1, factory=5 (2 div + 1 conv + 1 evo + 1 rescore)
-    expect(mockQuery).toHaveBeenCalledTimes(8);
+    // taxonomy=4 (1 skeleton + 3 branches), methods=1, rubric=1, factory=5 (2 div + 1 conv + 1 evo + 1 rescore)
+    expect(mockQuery).toHaveBeenCalledTimes(11);
   });
 
   // -----------------------------------------------------------------------
@@ -519,8 +530,8 @@ describe('Integration – Full Pipeline end-to-end', () => {
     await runPipeline(SESSION_ID, 'methods');
     await runPipeline(SESSION_ID, 'rubric');
 
-    // Verify the rubric LLM call (3rd call, index 2) mentions the selected methods
-    const rubricPrompt = mockQuery.mock.calls[2][0].prompt;
+    // Verify the rubric LLM call (index 5: 0=skeleton, 1-3=branches, 4=methods, 5=rubric)
+    const rubricPrompt = mockQuery.mock.calls[5][0].prompt;
     expect(rubricPrompt).toContain('First Principles');
     expect(rubricPrompt).toContain('TRIZ');
   });
@@ -536,13 +547,13 @@ describe('Integration – Full Pipeline end-to-end', () => {
     await runPipeline(SESSION_ID, 'rubric');
     await runPipeline(SESSION_ID, 'factory');
 
-    // Factory diverge calls (4th and 5th, indices 3,4) should reference rubric gates
-    const divergeCall0 = mockQuery.mock.calls[3][0];
+    // Factory diverge calls (indices 6,7) should reference rubric gates
+    const divergeCall0 = mockQuery.mock.calls[6][0];
     expect(divergeCall0.prompt).toContain('Must be physically possible');
     expect(divergeCall0.prompt).toContain('Novelty');
 
-    // Factory convergence call (6th, index 5) should include all raw ideas + rubric
-    const convergeCall = mockQuery.mock.calls[5][0];
+    // Factory convergence call (index 8) should include all raw ideas + rubric
+    const convergeCall = mockQuery.mock.calls[8][0];
     expect(convergeCall.prompt).toContain('worker-0-0');
     expect(convergeCall.prompt).toContain('worker-1-0');
   });
@@ -622,23 +633,28 @@ describe('Integration – Full Pipeline end-to-end', () => {
     await runPipeline(SESSION_ID, 'rubric');
     await runPipeline(SESSION_ID, 'factory');
 
-    // Call 0: taxonomy → navigator model
+    // Call 0: taxonomy skeleton → navigator model
     expect(mockQuery.mock.calls[0][0].options.model).toBe('claude-haiku-4-20250414');
 
-    // Call 1: methods → strategist model
-    expect(mockQuery.mock.calls[1][0].options.model).toBe('claude-sonnet-4-20250514');
+    // Calls 1-3: taxonomy branch expansion → navigator model
+    expect(mockQuery.mock.calls[1][0].options.model).toBe('claude-haiku-4-20250414');
+    expect(mockQuery.mock.calls[2][0].options.model).toBe('claude-haiku-4-20250414');
+    expect(mockQuery.mock.calls[3][0].options.model).toBe('claude-haiku-4-20250414');
 
-    // Call 2: rubric → strategist model
-    expect(mockQuery.mock.calls[2][0].options.model).toBe('claude-sonnet-4-20250514');
-
-    // Calls 3-4: factory diverge → worker model
-    expect(mockQuery.mock.calls[3][0].options.model).toBe('claude-sonnet-4-20250514');
+    // Call 4: methods → strategist model
     expect(mockQuery.mock.calls[4][0].options.model).toBe('claude-sonnet-4-20250514');
 
-    // Calls 5-7: factory converge/evolve/rescore → analyst model
+    // Call 5: rubric → strategist model
     expect(mockQuery.mock.calls[5][0].options.model).toBe('claude-sonnet-4-20250514');
+
+    // Calls 6-7: factory diverge → worker model
     expect(mockQuery.mock.calls[6][0].options.model).toBe('claude-sonnet-4-20250514');
     expect(mockQuery.mock.calls[7][0].options.model).toBe('claude-sonnet-4-20250514');
+
+    // Calls 8-10: factory converge/evolve/rescore → analyst model
+    expect(mockQuery.mock.calls[8][0].options.model).toBe('claude-sonnet-4-20250514');
+    expect(mockQuery.mock.calls[9][0].options.model).toBe('claude-sonnet-4-20250514');
+    expect(mockQuery.mock.calls[10][0].options.model).toBe('claude-sonnet-4-20250514');
   });
 
   // -----------------------------------------------------------------------
@@ -728,9 +744,12 @@ describe('Integration – Full Pipeline end-to-end', () => {
   // 21. Error in one stage prevents stage_complete and emits status:error
   // -----------------------------------------------------------------------
   it('emits status:error when a stage fails', async () => {
-    // Only set up taxonomy mock, then fail on methods
+    // Set up taxonomy skeleton + branches, then fail on methods
     mockQuery
-      .mockReturnValueOnce(queryResult(JSON.stringify(taxonomyTree)))
+      .mockReturnValueOnce(queryResult(JSON.stringify(taxonomySkeleton)))
+      .mockReturnValueOnce(queryResult(JSON.stringify(expandedBranches[0])))
+      .mockReturnValueOnce(queryResult(JSON.stringify(expandedBranches[1])))
+      .mockReturnValueOnce(queryResult(JSON.stringify(expandedBranches[2])))
       .mockImplementationOnce(() => { throw new Error('Rate limit exceeded'); });
 
     await runPipeline(SESSION_ID, 'taxonomy');
