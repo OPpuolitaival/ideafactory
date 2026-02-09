@@ -532,7 +532,8 @@ describe('handleSSEEvent', () => {
     expect(state.combinedPool).toEqual([scoredIdea, evolvedIdea]);
   });
 
-  it('data:qa_sheet appends to qaSheets', () => {
+  it('data:qa_sheet appends to qaSheets without clearing qaInProgress', () => {
+    useSessionStore.setState({ qaInProgress: true });
     const event: SSEEvent = {
       type: 'data:qa_sheet',
       data: qaResult,
@@ -541,16 +542,20 @@ describe('handleSSEEvent', () => {
 
     const state = useSessionStore.getState();
     expect(state.qaSheets).toEqual([qaResult]);
+    expect(state.qaInProgress).toBe(true);
   });
 
-  it('data:idea_package appends to ideaPackages', () => {
+  it('data:idea_package appends to ideaPackages without clearing packagingInProgress', () => {
+    useSessionStore.setState({ packagingInProgress: true });
     const event: SSEEvent = {
       type: 'data:idea_package',
       data: ideaPackage,
     };
     useSessionStore.getState().handleSSEEvent(event);
 
-    expect(useSessionStore.getState().ideaPackages).toEqual([ideaPackage]);
+    const state = useSessionStore.getState();
+    expect(state.ideaPackages).toEqual([ideaPackage]);
+    expect(state.packagingInProgress).toBe(true);
   });
 
   it('factory:progress sets factoryProgress', () => {
@@ -1211,6 +1216,34 @@ describe('hydrateFromSession', () => {
     });
 
     expect(useSessionStore.getState().sessionModels).toEqual(models);
+  });
+
+  it('hydrates combinedPool with DB row IDs overriding data.id', () => {
+    useSessionStore.getState().hydrateFromSession({
+      id: 'hydrate-ids',
+      domain: 'Chairs',
+      status: 'factory',
+      coordinate: null,
+      taxonomy: null,
+      methods: null,
+      rubric: null,
+      ideas: [
+        { id: 'db-nano-1', phase: 'converge', workerId: null, data: { ...scoredIdea, id: 'scored-0' } },
+        { id: 'db-nano-2', phase: 'evolve', workerId: null, data: { ...evolvedIdea, id: 'evolved-0' } },
+      ],
+      qaSheets: [],
+      ideaPackages: [],
+      eventLog: [],
+    });
+
+    const s = useSessionStore.getState();
+    // combinedPool IDs should be DB row IDs, not LLM-generated IDs
+    expect(s.combinedPool).toHaveLength(2);
+    expect(s.combinedPool[0].id).toBe('db-nano-1');
+    expect(s.combinedPool[1].id).toBe('db-nano-2');
+    // scoredIdeas and evolvedIdeas should also use DB IDs
+    expect(s.scoredIdeas[0].id).toBe('db-nano-1');
+    expect(s.evolvedIdeas[0].id).toBe('db-nano-2');
   });
 
   it('sets factoryPhase to complete when status is completed', () => {

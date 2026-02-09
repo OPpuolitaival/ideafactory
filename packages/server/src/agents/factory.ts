@@ -518,10 +518,11 @@ async function runConvergence(
 
   const eliminated = [...gateFailed, ...belowCutoff];
 
-  // Step 4: Persist all to DB
+  // Step 4: Persist all to DB and update in-memory IDs to DB nanoids
   for (const idea of [...survivors, ...eliminated]) {
+    const dbId = nanoid(12);
     await db.insert(schema.ideas).values({
-      id: nanoid(12),
+      id: dbId,
       sessionId,
       name: idea.name,
       description: idea.description,
@@ -530,6 +531,7 @@ async function runConvergence(
       eliminated: idea.eliminated ? 1 : 0,
       data: JSON.stringify(idea),
     });
+    idea.id = dbId;
   }
 
   sseManager.emit(sessionId, {
@@ -685,10 +687,11 @@ Return ONLY the JSON array, no other text.`,
   const gatePassedEvolved = rescored.filter((s) => !s.eliminated);
   gatePassedEvolved.sort((a, b) => b.totalScore - a.totalScore);
 
-  // Persist evolved ideas (no top-N cutoff — all gate-passing evolved concepts join the pool)
+  // Persist evolved ideas and update in-memory IDs to DB nanoids
   for (const idea of gatePassedEvolved) {
+    const dbId = nanoid(12);
     await db.insert(schema.ideas).values({
-      id: nanoid(12),
+      id: dbId,
       sessionId,
       name: idea.name,
       description: idea.description,
@@ -697,6 +700,7 @@ Return ONLY the JSON array, no other text.`,
       eliminated: 0,
       data: JSON.stringify(idea),
     });
+    idea.id = dbId;
   }
 
   sseManager.emit(sessionId, {

@@ -342,6 +342,34 @@ describe('Factory – runFactory full pipeline', () => {
     expect(events).toContain('factory:interactive');
   });
 
+  // 4b. Combined pool in factory:interactive carries DB nanoid IDs (not LLM-generated)
+  it('factory:interactive event contains ideas with DB nanoid IDs', async () => {
+    await insertSession(testDb, 'sess-full-ids');
+    setupFullPipelineMocks();
+
+    await runFactory(factoryOptions('sess-full-ids'));
+
+    const interactiveEvents = mockEmit.mock.calls.filter(
+      ([sid, evt]: [string, { type: string }]) =>
+        sid === 'sess-full-ids' && evt.type === 'factory:interactive',
+    );
+
+    expect(interactiveEvents).toHaveLength(1);
+    const { combinedPool } = interactiveEvents[0][1].data;
+    expect(combinedPool.length).toBeGreaterThan(0);
+
+    for (const idea of combinedPool) {
+      // DB nanoid IDs are 12 chars, never start with scored- or evolved-
+      expect(idea.id).toHaveLength(12);
+      expect(idea.id).not.toMatch(/^scored-/);
+      expect(idea.id).not.toMatch(/^evolved-/);
+    }
+
+    // All IDs should be unique
+    const ids = combinedPool.map((i: { id: string }) => i.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
   // 5. Makes exactly 5 LLM calls (2 diverge + 1 converge batch + 1 evolution + 1 rescore)
   it('makes exactly 5 LLM calls', async () => {
     await insertSession(testDb, 'sess-full-6');
@@ -515,8 +543,11 @@ describe('Factory – Convergence phase', () => {
     const { survivors, eliminated } = convergenceEvents[0][1].data;
     expect(survivors).toHaveLength(2);
     expect(eliminated).toHaveLength(2);
-    expect(survivors[0].id).toBe('scored-0');
-    expect(eliminated[0].id).toBe('scored-1');
+    // After DB persist, IDs are DB nanoids (not LLM-generated like scored-*)
+    expect(survivors[0].id).not.toMatch(/^scored-/);
+    expect(survivors[0].id).toHaveLength(12);
+    expect(eliminated[0].id).not.toMatch(/^scored-/);
+    expect(eliminated[0].id).toHaveLength(12);
   });
 
   // 16. SSE data:convergence_result emitted
@@ -575,7 +606,7 @@ describe('Factory – Evolution phase', () => {
     runFactory = mod.runFactory;
   });
 
-  // 19. Evolution receives only survivors as pairs
+  // 19. Evolution receives only survivors as pairs (with DB nanoid IDs after convergence)
   it('evolution LLM call receives only survivors as pairs, not eliminated ideas', async () => {
     await insertSession(testDb, 'sess-evo-1');
     setupFullPipelineMocks();
@@ -585,12 +616,15 @@ describe('Factory – Evolution phase', () => {
     // Fourth call (index 3) is evolution worker 0
     const userMessage = mockQuery.mock.calls[3][0].prompt;
 
-    // Should reference scored-0 and scored-2 (survivors) as a pair
-    expect(userMessage).toContain('scored-0');
-    expect(userMessage).toContain('scored-2');
-    // Should NOT reference eliminated ideas
+    // After convergence, survivors have DB nanoid IDs (12 chars)
+    // The prompt should contain exactly 2 idea IDs (the 2 survivors in a pair)
+    // It should NOT contain LLM-generated IDs like scored-1 or scored-3 (eliminated)
     expect(userMessage).not.toContain('scored-1');
     expect(userMessage).not.toContain('scored-3');
+
+    // Should contain "Idea A" and "Idea C" (the two survivor names)
+    expect(userMessage).toContain('Idea A');
+    expect(userMessage).toContain('Idea C');
   });
 
   // 20. Evolution returns evolved concepts with re-scored data

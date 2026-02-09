@@ -263,8 +263,7 @@ function InteractiveView({
   packagingInProgress: boolean;
   isCompleted: boolean;
 }) {
-  const [selectedForQA, setSelectedForQA] = useState<Set<string>>(new Set());
-  const [selectedForPkg, setSelectedForPkg] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const store = useSessionStore();
 
   const runQAMutation = trpc.session.runQA.useMutation();
@@ -276,8 +275,8 @@ function InteractiveView({
 
   const sorted = [...combinedPool].sort((a, b) => b.totalScore - a.totalScore);
 
-  const toggleQA = (id: string) => {
-    setSelectedForQA((prev) => {
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -285,35 +284,37 @@ function InteractiveView({
     });
   };
 
-  const togglePkg = (id: string) => {
-    setSelectedForPkg((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
+  const allSelectedHaveQA =
+    selected.size > 0 && Array.from(selected).every((id) => qaSheetMap.has(id));
 
   const handleRunQA = async () => {
-    if (!sessionId || selectedForQA.size === 0) return;
+    if (!sessionId || selected.size === 0) return;
     store.setError(null);
     useSessionStore.setState({ qaInProgress: true });
-    await runQAMutation.mutateAsync({
-      sessionId,
-      ideaIds: Array.from(selectedForQA),
-    });
-    setSelectedForQA(new Set());
+    try {
+      await runQAMutation.mutateAsync({
+        sessionId,
+        ideaIds: Array.from(selected),
+      });
+    } finally {
+      useSessionStore.setState({ qaInProgress: false });
+    }
+    // Keep selection — user can now click "Package Selected"
   };
 
   const handlePackage = async () => {
-    if (!sessionId || selectedForPkg.size === 0) return;
+    if (!sessionId || selected.size === 0) return;
     store.setError(null);
     useSessionStore.setState({ packagingInProgress: true });
-    await packageMutation.mutateAsync({
-      sessionId,
-      ideaIds: Array.from(selectedForPkg),
-    });
-    setSelectedForPkg(new Set());
+    try {
+      await packageMutation.mutateAsync({
+        sessionId,
+        ideaIds: Array.from(selected),
+      });
+      setSelected(new Set());
+    } finally {
+      useSessionStore.setState({ packagingInProgress: false });
+    }
   };
 
   const handleComplete = async () => {
@@ -430,32 +431,28 @@ function InteractiveView({
       <section>
         <h3 className="text-lg font-semibold mb-2">Idea Pool</h3>
         <p className="text-sm text-gray-400 mb-4">
-          Select ideas to run QA or package. Ideas already QA'd or packaged are marked.
+          Click ideas to select them, then run QA or package.
         </p>
 
         {!isCompleted && (
           <div className="flex items-center gap-3 mb-4">
             <button
               onClick={handleRunQA}
-              disabled={
-                selectedForQA.size === 0 || qaInProgress || runQAMutation.isPending
-              }
+              disabled={selected.size === 0 || qaInProgress || runQAMutation.isPending}
               className="btn-primary text-sm"
             >
-              {qaInProgress ? 'Running QA...' : `Run QA on Selected (${selectedForQA.size})`}
+              {qaInProgress ? 'Running QA...' : `Run QA on Selected (${selected.size})`}
             </button>
             <button
               onClick={handlePackage}
               disabled={
-                selectedForPkg.size === 0 ||
-                packagingInProgress ||
-                packageMutation.isPending
+                !allSelectedHaveQA || packagingInProgress || packageMutation.isPending
               }
               className="btn-secondary text-sm"
             >
               {packagingInProgress
                 ? 'Packaging...'
-                : `Package Selected (${selectedForPkg.size})`}
+                : `Package Selected (${selected.size})`}
             </button>
           </div>
         )}
@@ -464,29 +461,24 @@ function InteractiveView({
           {sorted.map((idea) => {
             const hasQA = qaSheetMap.has(idea.id);
             const hasPkg = pkgMap.has(idea.id);
-            const qaChecked = selectedForQA.has(idea.id);
-            const pkgChecked = selectedForPkg.has(idea.id);
+            const isSelected = selected.has(idea.id);
 
             return (
-              <div key={idea.id} className="card flex items-center gap-4">
+              <div
+                key={idea.id}
+                onClick={() => !isCompleted && toggleSelect(idea.id)}
+                className={`card flex items-center gap-4 ${
+                  !isCompleted ? 'cursor-pointer' : ''
+                } ${isSelected ? 'border-accent/50 bg-accent/5' : ''}`}
+              >
                 {!isCompleted && (
-                  <div className="flex items-center gap-2 shrink-0">
-                    <input
-                      type="checkbox"
-                      checked={qaChecked}
-                      onChange={() => toggleQA(idea.id)}
-                      className="accent-accent"
-                      title="Select for QA"
-                    />
-                    <input
-                      type="checkbox"
-                      checked={pkgChecked}
-                      onChange={() => togglePkg(idea.id)}
-                      className="accent-accent"
-                      title="Select for packaging"
-                      disabled={!hasQA}
-                    />
-                  </div>
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleSelect(idea.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="accent-accent shrink-0"
+                  />
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">

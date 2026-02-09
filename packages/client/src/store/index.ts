@@ -305,17 +305,18 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       }
 
       if (convergeIdeas.length > 0) {
-        store.setScoredIdeas(convergeIdeas.filter((i) => i.data).map((i) => i.data));
+        store.setScoredIdeas(convergeIdeas.filter((i) => i.data).map((i) => ({ ...i.data, id: i.id })));
       }
 
       if (evolveIdeas.length > 0) {
-        store.setEvolvedIdeas(evolveIdeas.filter((i) => i.data).map((i) => i.data));
+        store.setEvolvedIdeas(evolveIdeas.filter((i) => i.data).map((i) => ({ ...i.data, id: i.id })));
       }
 
       // Reconstruct combined pool from non-eliminated converge + evolve ideas
+      // Override data.id with DB row id so IDs match what QA/packaging expect
       const poolIdeas = [...convergeIdeas, ...evolveIdeas]
         .filter((i) => i.data && !i.data.eliminated)
-        .map((i) => i.data);
+        .map((i) => ({ ...i.data, id: i.id }));
       if (poolIdeas.length > 0) {
         store.setCombinedPool(poolIdeas);
       }
@@ -433,11 +434,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         break;
       case 'data:qa_sheet':
         store.addQASheet(event.data);
-        set({ qaInProgress: false });
         break;
       case 'data:idea_package':
         store.addIdeaPackage(event.data);
-        set({ packagingInProgress: false });
         break;
       case 'factory:progress':
         set({ factoryProgress: event.data });
