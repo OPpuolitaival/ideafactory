@@ -209,21 +209,6 @@ const rescoredEvolved = [
   },
 ];
 
-/** QA results for the evolved concept */
-const qaResults = [
-  {
-    conceptId: 'evolved-0',
-    feasibilityScore: 4,
-    risks: [
-      { category: 'Technical', description: 'Complex implementation', severity: 'medium', mitigation: 'Phase rollout' },
-      { category: 'Market', description: 'Uncertain demand', severity: 'low' },
-      { category: 'Cost', description: 'High initial investment', severity: 'medium', mitigation: 'Seek funding' },
-    ],
-    verdict: 'strong',
-    summary: 'Solid concept with manageable risks.',
-  },
-];
-
 // ---------------------------------------------------------------------------
 // Factory options builder
 // ---------------------------------------------------------------------------
@@ -242,13 +227,12 @@ function factoryOptions(sessionId: string) {
 }
 
 /**
- * Set up all 6 mockQuery responses for a full pipeline run:
+ * Set up all 5 mockQuery responses for a full pipeline run:
  * 0. Worker 0 diverge (First Principles)
  * 1. Worker 1 diverge (TRIZ)
  * 2. Convergence batch (4 ideas in 1 batch)
  * 3. Evolution worker 0 (1 pair of survivors)
  * 4. Rescore batch (1 evolved concept)
- * 5. QA
  */
 function setupFullPipelineMocks() {
   mockQuery
@@ -256,8 +240,7 @@ function setupFullPipelineMocks() {
     .mockReturnValueOnce(queryResult(JSON.stringify(worker1Ideas)))
     .mockReturnValueOnce(queryResult(JSON.stringify(scoredIdeas)))
     .mockReturnValueOnce(queryResult(JSON.stringify(evolvedConcepts)))
-    .mockReturnValueOnce(queryResult(JSON.stringify(rescoredEvolved)))
-    .mockReturnValueOnce(queryResult(JSON.stringify(qaResults)));
+    .mockReturnValueOnce(queryResult(JSON.stringify(rescoredEvolved)));
 }
 
 // ==========================================================================
@@ -334,28 +317,7 @@ describe('Factory – runFactory full pipeline', () => {
     }
   });
 
-  // 4. Full pipeline persists QA results
-  it('persists QA results to DB with phase="qa"', async () => {
-    await insertSession(testDb, 'sess-full-4');
-    setupFullPipelineMocks();
-
-    await runFactory(factoryOptions('sess-full-4'));
-
-    const qaRows = await testDb
-      .select()
-      .from(schema.ideas)
-      .where(and(eq(schema.ideas.sessionId, 'sess-full-4'), eq(schema.ideas.phase, 'qa')));
-
-    // 1 QA result
-    expect(qaRows).toHaveLength(1);
-    const row = qaRows[0];
-    expect(row.phase).toBe('qa');
-    expect(row.name).toBe('evolved-0'); // conceptId
-    expect(row.description).toBe('Solid concept with manageable risks.');
-    expect(row.score).toBe(4); // feasibilityScore
-  });
-
-  // 5. All expected SSE events are emitted in order
+  // 4. All expected SSE events are emitted in order
   it('emits all expected SSE events in order', async () => {
     await insertSession(testDb, 'sess-full-5');
     setupFullPipelineMocks();
@@ -376,18 +338,18 @@ describe('Factory – runFactory full pipeline', () => {
     // Evolution phase events
     expect(events).toContain('data:evolution_result');
 
-    // QA phase events
-    expect(events).toContain('data:qa_result');
+    // Interactive phase event (combined pool ready)
+    expect(events).toContain('factory:interactive');
   });
 
-  // 6. Makes exactly 6 LLM calls (2 diverge + 1 converge batch + 1 evolution + 1 rescore + 1 QA)
-  it('makes exactly 6 LLM calls', async () => {
+  // 5. Makes exactly 5 LLM calls (2 diverge + 1 converge batch + 1 evolution + 1 rescore)
+  it('makes exactly 5 LLM calls', async () => {
     await insertSession(testDb, 'sess-full-6');
     setupFullPipelineMocks();
 
     await runFactory(factoryOptions('sess-full-6'));
 
-    expect(mockQuery).toHaveBeenCalledTimes(6);
+    expect(mockQuery).toHaveBeenCalledTimes(5);
   });
 
   // 7. Converge eliminated ideas have eliminated=1 in DB
@@ -409,20 +371,6 @@ describe('Factory – runFactory full pipeline', () => {
     expect(eliminated).toHaveLength(2);
   });
 
-  // 8. QA verdict "strong" results in eliminated=0
-  it('sets eliminated=0 for QA verdict "strong"', async () => {
-    await insertSession(testDb, 'sess-full-8');
-    setupFullPipelineMocks();
-
-    await runFactory(factoryOptions('sess-full-8'));
-
-    const qaRows = await testDb
-      .select()
-      .from(schema.ideas)
-      .where(and(eq(schema.ideas.sessionId, 'sess-full-8'), eq(schema.ideas.phase, 'qa')));
-
-    expect(qaRows[0].eliminated).toBe(0);
-  });
 });
 
 // ==========================================================================
@@ -675,109 +623,8 @@ describe('Factory – Evolution phase', () => {
     );
 
     expect(evolutionEvents).toHaveLength(1);
-    expect(evolutionEvents[0][1].data.evolved).toHaveLength(1);
-  });
-});
-
-// ==========================================================================
-// QA Phase Tests
-// ==========================================================================
-
-describe('Factory – QA phase', () => {
-  let runFactory: typeof import('./factory.js')['runFactory'];
-
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    testDb = createTestDb();
-    const mod = await import('./factory.js');
-    runFactory = mod.runFactory;
-  });
-
-  // 23. QA receives evolved concepts
-  it('QA LLM call receives evolved concepts', async () => {
-    await insertSession(testDb, 'sess-qa-1');
-    setupFullPipelineMocks();
-
-    await runFactory(factoryOptions('sess-qa-1'));
-
-    // Sixth call (index 5) is QA
-    const userMessage = mockQuery.mock.calls[5][0].prompt;
-
-    // Should reference the re-scored evolved concept
-    expect(userMessage).toContain('Hybrid A+C');
-    expect(userMessage).toContain('evolved-0');
-  });
-
-  // 24. QA returns results with feasibility, risks, verdict
-  it('QA results contain feasibilityScore, risks, verdict, and summary', async () => {
-    await insertSession(testDb, 'sess-qa-2');
-    setupFullPipelineMocks();
-
-    await runFactory(factoryOptions('sess-qa-2'));
-
-    const qaRows = await testDb
-      .select()
-      .from(schema.ideas)
-      .where(and(eq(schema.ideas.sessionId, 'sess-qa-2'), eq(schema.ideas.phase, 'qa')));
-
-    expect(qaRows).toHaveLength(1);
-    const stored = JSON.parse(qaRows[0].data!);
-    expect(stored.feasibilityScore).toBe(4);
-    expect(stored.risks).toHaveLength(3);
-    expect(stored.verdict).toBe('strong');
-    expect(stored.summary).toBe('Solid concept with manageable risks.');
-  });
-
-  // 25. SSE data:qa_result emitted
-  it('emits data:qa_result SSE event', async () => {
-    await insertSession(testDb, 'sess-qa-3');
-    setupFullPipelineMocks();
-
-    await runFactory(factoryOptions('sess-qa-3'));
-
-    const qaEvents = mockEmit.mock.calls.filter(
-      ([sid, evt]: [string, { type: string }]) =>
-        sid === 'sess-qa-3' && evt.type === 'data:qa_result',
-    );
-
-    expect(qaEvents).toHaveLength(1);
-    expect(qaEvents[0][1].data.reviewed).toHaveLength(1);
-  });
-
-  // 27. QA verdict "weak" sets eliminated=1
-  it('QA verdict "weak" sets eliminated=1 in DB', async () => {
-    await insertSession(testDb, 'sess-qa-5');
-
-    const weakQaResults = [
-      {
-        conceptId: 'evolved-0',
-        feasibilityScore: 2,
-        risks: [
-          { category: 'Technical', description: 'Too complex', severity: 'critical' },
-          { category: 'Market', description: 'No demand', severity: 'high' },
-          { category: 'Cost', description: 'Too expensive', severity: 'high' },
-        ],
-        verdict: 'weak',
-        summary: 'Not viable in current form.',
-      },
-    ];
-
-    mockQuery
-      .mockReturnValueOnce(queryResult(JSON.stringify(worker0Ideas)))
-      .mockReturnValueOnce(queryResult(JSON.stringify(worker1Ideas)))
-      .mockReturnValueOnce(queryResult(JSON.stringify(scoredIdeas)))
-      .mockReturnValueOnce(queryResult(JSON.stringify(evolvedConcepts)))
-      .mockReturnValueOnce(queryResult(JSON.stringify(rescoredEvolved)))
-      .mockReturnValueOnce(queryResult(JSON.stringify(weakQaResults)));
-
-    await runFactory(factoryOptions('sess-qa-5'));
-
-    const qaRows = await testDb
-      .select()
-      .from(schema.ideas)
-      .where(and(eq(schema.ideas.sessionId, 'sess-qa-5'), eq(schema.ideas.phase, 'qa')));
-
-    expect(qaRows[0].eliminated).toBe(1);
+    // Evolution merge: 2 survivors + 1 evolved = 3 combined
+    expect(evolutionEvents[0][1].data.evolved).toHaveLength(3);
   });
 });
 
@@ -799,7 +646,7 @@ describe('Factory – Edge cases', () => {
   it('works with a single method (single worker)', async () => {
     await insertSession(testDb, 'sess-edge-1');
 
-    // Convergence with 1 survivor from 2 ideas → 0 pairs → evolution fallback → QA with original survivor
+    // Convergence with 1 survivor from 2 ideas → 0 pairs → evolution fallback (no evolve LLM call)
     const singleMethodScored = [
       {
         id: 'scored-0', sourceIds: ['worker-0-0'], name: 'Idea A', description: 'Desc A',
@@ -828,30 +675,17 @@ describe('Factory – Edge cases', () => {
       },
     ];
 
-    const singleMethodQa = [
-      {
-        conceptId: 'scored-0', feasibilityScore: 4,
-        risks: [
-          { category: 'Technical', description: 'Complex', severity: 'medium', mitigation: 'Plan' },
-          { category: 'Market', description: 'Risk', severity: 'low' },
-          { category: 'Cost', description: 'Expensive', severity: 'medium', mitigation: 'Fund' },
-        ],
-        verdict: 'strong', summary: 'Good concept.',
-      },
-    ];
-
-    // 1 diverge + 1 converge batch + 0 evolution (1 survivor, 0 pairs) + 1 QA = 3
+    // 1 diverge + 1 converge batch + 0 evolution (1 survivor, 0 pairs) = 2
     mockQuery
       .mockReturnValueOnce(queryResult(JSON.stringify(worker0Ideas)))
-      .mockReturnValueOnce(queryResult(JSON.stringify(singleMethodScored)))
-      .mockReturnValueOnce(queryResult(JSON.stringify(singleMethodQa)));
+      .mockReturnValueOnce(queryResult(JSON.stringify(singleMethodScored)));
 
     const opts = factoryOptions('sess-edge-1');
     opts.methods = [methods[0]];
 
     await runFactory(opts);
 
-    expect(mockQuery).toHaveBeenCalledTimes(3);
+    expect(mockQuery).toHaveBeenCalledTimes(2);
 
     const divergeRows = await testDb
       .select()
@@ -911,19 +745,15 @@ describe('Factory – Edge cases', () => {
       },
     ];
 
-    // Empty QA result (no concepts to QA, but QA is still called)
-    const emptyQa: unknown[] = [];
-
-    // 2 diverge + 1 converge + 0 evolution (0 survivors, 0 pairs) + 1 QA = 4
+    // 2 diverge + 1 converge + 0 evolution (0 survivors, 0 pairs) = 3
     mockQuery
       .mockReturnValueOnce(queryResult(JSON.stringify(worker0Ideas)))
       .mockReturnValueOnce(queryResult(JSON.stringify(worker1Ideas)))
-      .mockReturnValueOnce(queryResult(JSON.stringify(allEliminated)))
-      .mockReturnValueOnce(queryResult(JSON.stringify(emptyQa)));
+      .mockReturnValueOnce(queryResult(JSON.stringify(allEliminated)));
 
     await runFactory(factoryOptions('sess-edge-2'));
 
-    expect(mockQuery).toHaveBeenCalledTimes(4);
+    expect(mockQuery).toHaveBeenCalledTimes(3);
 
     // All converge ideas should be eliminated
     const convergeRows = await testDb
@@ -1017,26 +847,13 @@ describe('Factory – Partial worker failure', () => {
       },
     ];
 
-    const partialQa = [
-      {
-        conceptId: 'scored-0', feasibilityScore: 4,
-        risks: [
-          { category: 'Technical', description: 'Complex', severity: 'medium', mitigation: 'Plan' },
-          { category: 'Market', description: 'Risk', severity: 'low' },
-          { category: 'Cost', description: 'Expensive', severity: 'medium', mitigation: 'Fund' },
-        ],
-        verdict: 'strong', summary: 'Good.',
-      },
-    ];
-
     // Worker 0 succeeds, Worker 1 fails with auth error (non-retryable)
     const authError = new Error('401 Unauthorized');
-    // 1 success + 1 fail + 1 converge batch + 0 evolution (1 survivor) + 1 QA = 4
+    // 1 success + 1 fail + 1 converge batch + 0 evolution (1 survivor) = 3
     mockQuery
       .mockReturnValueOnce(queryResult(JSON.stringify(worker0Ideas)))
       .mockImplementationOnce(() => { throw authError; })
-      .mockReturnValueOnce(queryResult(JSON.stringify(partialScored)))
-      .mockReturnValueOnce(queryResult(JSON.stringify(partialQa)));
+      .mockReturnValueOnce(queryResult(JSON.stringify(partialScored)));
 
     await runFactory(factoryOptions('sess-partial-1'));
 
@@ -1064,7 +881,7 @@ describe('Factory – Partial worker failure', () => {
     expect(progressEvents.length).toBeGreaterThanOrEqual(1);
 
     // Pipeline still completes
-    expect(mockQuery).toHaveBeenCalledTimes(4);
+    expect(mockQuery).toHaveBeenCalledTimes(3);
   });
 
   it('throws when ALL workers fail', async () => {
@@ -1118,24 +935,11 @@ describe('Factory – Partial worker failure', () => {
       },
     ];
 
-    const partialQa = [
-      {
-        conceptId: 'scored-0', feasibilityScore: 4,
-        risks: [
-          { category: 'Technical', description: 'Complex', severity: 'medium', mitigation: 'Plan' },
-          { category: 'Market', description: 'Risk', severity: 'low' },
-          { category: 'Cost', description: 'Expensive', severity: 'medium', mitigation: 'Fund' },
-        ],
-        verdict: 'strong', summary: 'Good.',
-      },
-    ];
-
     const notFoundError = new Error('404 model unavailable');
     mockQuery
       .mockReturnValueOnce(queryResult(JSON.stringify(worker0Ideas)))
       .mockImplementationOnce(() => { throw notFoundError; })
-      .mockReturnValueOnce(queryResult(JSON.stringify(partialScored)))
-      .mockReturnValueOnce(queryResult(JSON.stringify(partialQa)));
+      .mockReturnValueOnce(queryResult(JSON.stringify(partialScored)));
 
     await runFactory(factoryOptions('sess-fail-msg'));
 
@@ -1198,8 +1002,8 @@ describe('Factory – SSE event details', () => {
         evt.data.agent === 'Analyst',
     );
 
-    // At least 4 analyst events: converging, convergence complete, evolving, evolution complete, QA, QA complete
-    expect(analystEvents.length).toBeGreaterThanOrEqual(4);
+    // At least 3 analyst events: converging, convergence complete, evolving, evolution complete
+    expect(analystEvents.length).toBeGreaterThanOrEqual(3);
   });
 
   // 33. Worker thought events include worker number and method name
@@ -1254,10 +1058,9 @@ describe('Factory – Model routing', () => {
     expect(mockQuery.mock.calls[0][0].options.model).toBe('claude-haiku-4-20250414');
     expect(mockQuery.mock.calls[1][0].options.model).toBe('claude-haiku-4-20250414');
 
-    // Converge, evolution, rescore, QA (calls 2-5) should use analystModel
+    // Converge, evolution, rescore (calls 2-4) should use analystModel
     expect(mockQuery.mock.calls[2][0].options.model).toBe('claude-sonnet-4-20250514');
     expect(mockQuery.mock.calls[3][0].options.model).toBe('claude-sonnet-4-20250514');
     expect(mockQuery.mock.calls[4][0].options.model).toBe('claude-sonnet-4-20250514');
-    expect(mockQuery.mock.calls[5][0].options.model).toBe('claude-sonnet-4-20250514');
   });
 });

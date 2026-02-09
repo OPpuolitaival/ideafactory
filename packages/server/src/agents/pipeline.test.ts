@@ -36,7 +36,6 @@ const mockRunTaxonomy = vi.fn().mockResolvedValue(undefined);
 const mockRunMethodSelection = vi.fn().mockResolvedValue(undefined);
 const mockRunRubricDesign = vi.fn().mockResolvedValue(undefined);
 const mockRunFactory = vi.fn().mockResolvedValue(undefined);
-const mockRunOutput = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('./navigator.js', () => ({ runTaxonomy: (...args: unknown[]) => mockRunTaxonomy(...args) }));
 vi.mock('./strategist.js', () => ({
@@ -44,7 +43,6 @@ vi.mock('./strategist.js', () => ({
   runRubricDesign: (...args: unknown[]) => mockRunRubricDesign(...args),
 }));
 vi.mock('./factory.js', () => ({ runFactory: (...args: unknown[]) => mockRunFactory(...args) }));
-vi.mock('./analyst.js', () => ({ runOutput: (...args: unknown[]) => mockRunOutput(...args) }));
 
 // ---------------------------------------------------------------------------
 // Mock: config
@@ -277,53 +275,7 @@ describe('Pipeline - runPipeline', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 7. Output stage: calls runOutput, marks session completed
-  // -----------------------------------------------------------------------
-  it('output stage calls runOutput and marks session as completed', async () => {
-    const sid = 'sess-pipe-output';
-    await insertSession(testDb, sid);
-    await insertMethodSelection(testDb, sid, [1]);
-    await insertIdea(testDb, 'idea-1', sid, { phase: 'diverge' });
-    await insertIdea(testDb, 'idea-2', sid, { phase: 'evolve', score: 8.5 });
-
-    await runPipeline(sid, 'output');
-
-    expect(mockRunOutput).toHaveBeenCalledTimes(1);
-    const outputArgs = mockRunOutput.mock.calls[0][0];
-    expect(outputArgs.sessionId).toBe(sid);
-    expect(outputArgs.domain).toBe('test domain');
-    expect(outputArgs.methods).toEqual(allMethods);
-    expect(outputArgs.ideas).toHaveLength(2);
-    expect(outputArgs.model).toBe('claude-sonnet-4-20250514');
-
-    // Verify session is marked completed
-    const [session] = await testDb
-      .select()
-      .from(schema.sessions)
-      .where(eq(schema.sessions.id, sid));
-    expect(session.status).toBe('completed');
-  });
-
-  // -----------------------------------------------------------------------
-  // 8. Output stage: emits status:stage_complete with next='completed'
-  // -----------------------------------------------------------------------
-  it('output stage emits status:stage_complete with next completed', async () => {
-    const sid = 'sess-pipe-output-sse';
-    await insertSession(testDb, sid);
-    await insertMethodSelection(testDb, sid, [1]);
-
-    await runPipeline(sid, 'output');
-
-    const stageCompleteEvents = mockEmit.mock.calls.filter(
-      ([sessionId, evt]: [string, { type: string; data: { stage: string; next: string } }]) =>
-        sessionId === sid && evt.type === 'status:stage_complete',
-    );
-    expect(stageCompleteEvents).toHaveLength(1);
-    expect(stageCompleteEvents[0][1].data).toEqual({ stage: 'output', next: 'completed' });
-  });
-
-  // -----------------------------------------------------------------------
-  // 9. Error handling: emits status:error when agent throws
+  // 7. Error handling: emits status:error when agent throws
   // -----------------------------------------------------------------------
   it('emits status:error when agent function throws', async () => {
     const sid = 'sess-pipe-throw';
@@ -419,9 +371,9 @@ describe('Pipeline - runPipeline', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 15. Factory stage: emits status:stage_complete with next='output'
+  // 13. Factory stage: does NOT emit status:stage_complete (interactive mode)
   // -----------------------------------------------------------------------
-  it('factory stage emits status:stage_complete with next output', async () => {
+  it('factory stage does not emit status:stage_complete (stays in interactive mode)', async () => {
     const sid = 'sess-pipe-factory-sse';
     await insertSession(testDb, sid);
     await insertMethodSelection(testDb, sid, [1]);
@@ -430,10 +382,9 @@ describe('Pipeline - runPipeline', () => {
     await runPipeline(sid, 'factory');
 
     const stageCompleteEvents = mockEmit.mock.calls.filter(
-      ([sessionId, evt]: [string, { type: string; data: { stage: string; next: string } }]) =>
+      ([sessionId, evt]: [string, { type: string }]) =>
         sessionId === sid && evt.type === 'status:stage_complete',
     );
-    expect(stageCompleteEvents).toHaveLength(1);
-    expect(stageCompleteEvents[0][1].data).toEqual({ stage: 'factory', next: 'output' });
+    expect(stageCompleteEvents).toHaveLength(0);
   });
 });

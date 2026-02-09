@@ -105,7 +105,7 @@ async function seedSession(overrides: Partial<{
   await testDb.insert(schema.sessions).values({ ...defaults, ...overrides });
 }
 
-/** Insert a completed session with an output package (used by export tests). */
+/** Insert a completed session with ideas (used by export tests). */
 async function seedCompletedSession() {
   await testDb.insert(schema.sessions).values({
     id: 'export-sess',
@@ -116,36 +116,13 @@ async function seedCompletedSession() {
     updatedAt: Date.now(),
     config: '{}',
   });
-  await testDb.insert(schema.outputPackages).values({
+  await testDb.insert(schema.ideas).values({
+    id: 'idea-export-1',
     sessionId: 'export-sess',
-    package: JSON.stringify({
-      concepts: [
-        {
-          rank: 1,
-          name: 'C1',
-          description: 'D',
-          pros: ['p'],
-          cons: ['c'],
-          openQuestions: ['q'],
-          nextSteps: ['s'],
-          qaVerdict: 'strong',
-        },
-      ],
-      overallInsights: 'insight',
-      suggestedNextSprint: ['action'],
-      sessionMetadata: {
-        domain: 'Test',
-        coordinate: 'Test > A',
-        methods: ['M1'],
-        methodCount: 1,
-        totalIdeasGenerated: 5,
-        totalIdeasSurvived: 2,
-        duration: 1000,
-      },
-    }),
-    artifacts: JSON.stringify([
-      { type: 'report_page', format: 'html', content: '<html>Report</html>', label: 'Report' },
-    ]),
+    name: 'C1',
+    description: 'D',
+    phase: 'converge',
+    score: 20,
   });
 }
 
@@ -251,13 +228,12 @@ describe('cmdRun', () => {
       '--auto-accept-rubric',
     ]);
 
-    // taxonomy, methods, rubric, factory, output = 5 calls
-    expect(mockRunPipeline).toHaveBeenCalledTimes(5);
+    // taxonomy, methods, rubric, factory = 4 calls (no output stage)
+    expect(mockRunPipeline).toHaveBeenCalledTimes(4);
     expect(mockRunPipeline).toHaveBeenNthCalledWith(1, 'test-id-1', 'taxonomy');
     expect(mockRunPipeline).toHaveBeenNthCalledWith(2, 'test-id-1', 'methods');
     expect(mockRunPipeline).toHaveBeenNthCalledWith(3, 'test-id-1', 'rubric');
     expect(mockRunPipeline).toHaveBeenNthCalledWith(4, 'test-id-1', 'factory');
-    expect(mockRunPipeline).toHaveBeenNthCalledWith(5, 'test-id-1', 'output');
   });
 
   it('subscribes to SSE events for text output mode', async () => {
@@ -486,42 +462,18 @@ describe('cmdExport', () => {
     const parsed = JSON.parse(consoleOutput.join(''));
     expect(parsed.id).toBe('export-sess');
     expect(parsed.domain).toBe('Test');
-    expect(parsed.output).toBeDefined();
-    expect(parsed.output.package).toBeDefined();
+    expect(parsed.ideas).toHaveLength(1);
+    expect(parsed.ideas[0].name).toBe('C1');
   });
 
-  it('exports session as markdown', async () => {
-    await seedCompletedSession();
-
-    await runCommand('export', ['export-sess', '--format', 'markdown']);
-
-    const full = consoleOutput.join('\n');
-    expect(full).toContain('# Idea Factory Output');
-    expect(full).toContain('**Domain:** Test');
-    expect(full).toContain('**Coordinate:** Test > A');
-    expect(full).toContain('## Insights');
-    expect(full).toContain('insight');
-    expect(full).toContain('### 1. C1 [strong]');
-    expect(full).toContain('**Pros:** p');
-    expect(full).toContain('**Cons:** c');
-  });
-
-  it('exports session as HTML (report artifact)', async () => {
-    await seedCompletedSession();
-
-    await runCommand('export', ['export-sess', '--format', 'html']);
-
-    const full = consoleOutput.join('\n');
-    expect(full).toContain('<html>Report</html>');
-  });
-
-  it('defaults to markdown format when --format is not specified', async () => {
+  it('defaults to JSON format when --format is not specified', async () => {
     await seedCompletedSession();
 
     await runCommand('export', ['export-sess']);
 
-    const full = consoleOutput.join('\n');
-    expect(full).toContain('# Idea Factory Output');
+    const parsed = JSON.parse(consoleOutput.join(''));
+    expect(parsed.id).toBe('export-sess');
+    expect(parsed.ideas).toBeDefined();
   });
 
   it('exits with error when session ID is not provided', async () => {

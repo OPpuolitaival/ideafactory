@@ -165,16 +165,10 @@ async function cmdRun(args: string[]): Promise<void> {
         // Stage 4: Factory
         await runPipeline(sessionId, 'factory');
 
-        if (values['stop-at'] === 'factory') {
-          return printSessionOutput(sessionId, outputFormat);
+        if (!isQuiet) {
+          console.log(`\nFactory complete. Session ${sessionId} is now in interactive mode.`);
+          console.log(`Use the web UI to run QA, package ideas, and complete the session.`);
         }
-
-        await db.update(schema.sessions)
-          .set({ status: 'output', updatedAt: Date.now() })
-          .where(eq(schema.sessions.id, sessionId));
-
-        // Stage 5: Output
-        await runPipeline(sessionId, 'output');
       }
     }
   }
@@ -247,8 +241,15 @@ async function cmdSessions(args: string[]): Promise<void> {
         await db.insert(schema.ideas).values({ ...idea, id: nanoid(12), sessionId: newId });
       }
 
-      const [output] = await db.select().from(schema.outputPackages).where(eq(schema.outputPackages.sessionId, id));
-      if (output) await db.insert(schema.outputPackages).values({ ...output, sessionId: newId });
+      const qaSheets = await db.select().from(schema.qaSheets).where(eq(schema.qaSheets.sessionId, id));
+      for (const row of qaSheets) {
+        await db.insert(schema.qaSheets).values({ ...row, id: nanoid(12), sessionId: newId });
+      }
+
+      const ideaPkgs = await db.select().from(schema.ideaPackages).where(eq(schema.ideaPackages.sessionId, id));
+      for (const row of ideaPkgs) {
+        await db.insert(schema.ideaPackages).values({ ...row, id: nanoid(12), sessionId: newId });
+      }
 
       // Handle rollback
       const rollbackIdx = args.indexOf('--rollback-to');
@@ -334,10 +335,10 @@ async function cmdStage(args: string[]): Promise<void> {
 
 async function cmdExport(args: string[]): Promise<void> {
   const sessionId = args[0];
-  if (!sessionId) { console.error('Usage: export <session-id> --format [markdown|json|html]'); process.exit(1); }
+  if (!sessionId) { console.error('Usage: export <session-id> --format [json]'); process.exit(1); }
 
   const formatIdx = args.indexOf('--format');
-  const format = formatIdx !== -1 ? args[formatIdx + 1] : 'markdown';
+  const format = formatIdx !== -1 ? args[formatIdx + 1] : 'json';
 
   const session = await getFullSession(sessionId);
 
@@ -346,44 +347,8 @@ async function cmdExport(args: string[]): Promise<void> {
       console.log(JSON.stringify(session, null, 2));
       break;
 
-    case 'markdown': {
-      if (!session.output) {
-        console.error('Session has no output to export.');
-        process.exit(1);
-      }
-      const pkg = JSON.parse(session.output.package);
-      let md = `# Idea Factory Output\n\n`;
-      md += `**Domain:** ${pkg.sessionMetadata.domain}\n`;
-      md += `**Coordinate:** ${pkg.sessionMetadata.coordinate}\n\n`;
-      md += `## Insights\n\n${pkg.overallInsights}\n\n`;
-      for (const concept of pkg.concepts) {
-        md += `### ${concept.rank}. ${concept.name} [${concept.qaVerdict}]\n\n`;
-        md += `${concept.description}\n\n`;
-        md += `**Pros:** ${concept.pros.join(', ')}\n`;
-        md += `**Cons:** ${concept.cons.join(', ')}\n\n`;
-      }
-      console.log(md);
-      break;
-    }
-
-    case 'html': {
-      if (!session.output?.artifacts) {
-        console.error('Session has no HTML report artifact.');
-        process.exit(1);
-      }
-      const artifacts = JSON.parse(session.output.artifacts);
-      const report = artifacts.find((a: any) => a.type === 'report_page');
-      if (report) {
-        console.log(report.content);
-      } else {
-        console.error('No HTML report artifact found.');
-        process.exit(1);
-      }
-      break;
-    }
-
     default:
-      console.error(`Unknown format: ${format}. Use markdown, json, or html.`);
+      console.error(`Unknown format: ${format}. Use json.`);
       process.exit(1);
   }
 }
@@ -439,7 +404,8 @@ async function getFullSession(id: string) {
   const [methods] = await db.select().from(schema.methodSelections).where(eq(schema.methodSelections.sessionId, id));
   const [rubric] = await db.select().from(schema.rubrics).where(eq(schema.rubrics.sessionId, id));
   const ideas = await db.select().from(schema.ideas).where(eq(schema.ideas.sessionId, id));
-  const [output] = await db.select().from(schema.outputPackages).where(eq(schema.outputPackages.sessionId, id));
+  const qaSheets = await db.select().from(schema.qaSheets).where(eq(schema.qaSheets.sessionId, id));
+  const ideaPackages = await db.select().from(schema.ideaPackages).where(eq(schema.ideaPackages.sessionId, id));
 
   return {
     ...session,
@@ -447,7 +413,8 @@ async function getFullSession(id: string) {
     methods: methods ?? null,
     rubric: rubric ?? null,
     ideas,
-    output: output ?? null,
+    qaSheets,
+    ideaPackages,
   };
 }
 
@@ -468,9 +435,9 @@ async function rollbackSession(id: string, toStage: Stage) {
   if (stageIdx <= STAGE_ORDER.indexOf('factory')) {
     await db.delete(schema.ideas).where(eq(schema.ideas.sessionId, id));
   }
-  if (stageIdx <= STAGE_ORDER.indexOf('output')) {
-    await db.delete(schema.outputPackages).where(eq(schema.outputPackages.sessionId, id));
-  }
+  // Always clean QA sheets and packages on rollback
+  await db.delete(schema.qaSheets).where(eq(schema.qaSheets.sessionId, id));
+  await db.delete(schema.ideaPackages).where(eq(schema.ideaPackages.sessionId, id));
 
   await db.update(schema.sessions).set({ status: toStage, updatedAt: Date.now() }).where(eq(schema.sessions.id, id));
 }

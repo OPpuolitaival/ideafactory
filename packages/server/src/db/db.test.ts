@@ -7,7 +7,8 @@ import {
   methodSelections,
   rubrics,
   ideas,
-  outputPackages,
+  qaSheets,
+  ideaPackages,
   eventLog,
 } from './schema.js';
 
@@ -152,11 +153,28 @@ describe('Cascade delete', () => {
       })
       .run();
 
-    db.insert(outputPackages)
+    db.insert(qaSheets)
       .values({
+        id: 'qa-1',
         sessionId: 'sess-1',
-        package: JSON.stringify({ ideas: [] }),
-        artifacts: JSON.stringify([]),
+        ideaId: 'idea-1',
+        feasibilityScore: 3.5,
+        verdict: 'conditional',
+        summary: 'Needs more research',
+        risks: JSON.stringify([]),
+        createdAt: Date.now(),
+      })
+      .run();
+
+    db.insert(ideaPackages)
+      .values({
+        id: 'pkg-1',
+        sessionId: 'sess-1',
+        ideaId: 'idea-1',
+        ideaName: 'Test Idea',
+        htmlContent: '<html>report</html>',
+        deepResearchPrompt: '## Research',
+        createdAt: Date.now(),
       })
       .run();
 
@@ -194,9 +212,15 @@ describe('Cascade delete', () => {
     expect(rows).toHaveLength(0);
   });
 
-  it('should cascade-delete output_packages when session is deleted', () => {
+  it('should cascade-delete qa_sheets when session is deleted', () => {
     db.delete(sessions).where(eq(sessions.id, 'sess-1')).run();
-    const rows = db.select().from(outputPackages).all();
+    const rows = db.select().from(qaSheets).all();
+    expect(rows).toHaveLength(0);
+  });
+
+  it('should cascade-delete idea_packages when session is deleted', () => {
+    db.delete(sessions).where(eq(sessions.id, 'sess-1')).run();
+    const rows = db.select().from(ideaPackages).all();
     expect(rows).toHaveLength(0);
   });
 
@@ -213,7 +237,8 @@ describe('Cascade delete', () => {
     expect(db.select().from(methodSelections).all()).toHaveLength(0);
     expect(db.select().from(rubrics).all()).toHaveLength(0);
     expect(db.select().from(ideas).all()).toHaveLength(0);
-    expect(db.select().from(outputPackages).all()).toHaveLength(0);
+    expect(db.select().from(qaSheets).all()).toHaveLength(0);
+    expect(db.select().from(ideaPackages).all()).toHaveLength(0);
     expect(db.select().from(eventLog).all()).toHaveLength(0);
   });
 });
@@ -508,66 +533,88 @@ describe('Idea CRUD', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 7. Output package storage
+// 7. QA sheets storage
 // ---------------------------------------------------------------------------
-describe('Output package storage', () => {
-  it('should store and retrieve an output package with artifacts', () => {
+describe('QA sheets storage', () => {
+  it('should store and retrieve QA sheets', () => {
     insertSession();
+    db.insert(ideas)
+      .values({ id: 'idea-1', sessionId: 'sess-1', name: 'Idea', description: 'Desc', phase: 'converge' })
+      .run();
 
-    const pkg = {
-      title: 'Innovation Report',
-      ideas: [
-        { id: 'idea-1', name: 'Cool Thing', score: 9.0 },
-        { id: 'idea-2', name: 'Other Thing', score: 7.5 },
-      ],
-      summary: 'Top ideas from the session',
-    };
-
-    const artifacts = [
-      { type: 'chart', title: 'Scores', data: 'base64...' },
-      { type: 'table', title: 'Comparison', data: 'base64...' },
-    ];
-
-    db.insert(outputPackages)
+    const now = Date.now();
+    db.insert(qaSheets)
       .values({
+        id: 'qa-1',
         sessionId: 'sess-1',
-        package: JSON.stringify(pkg),
-        artifacts: JSON.stringify(artifacts),
+        ideaId: 'idea-1',
+        feasibilityScore: 3.5,
+        verdict: 'conditional',
+        summary: 'Needs research',
+        risks: JSON.stringify([{ category: 'Technical', severity: 'high' }]),
+        createdAt: now,
       })
       .run();
 
-    const [row] = db
-      .select()
-      .from(outputPackages)
-      .where(eq(outputPackages.sessionId, 'sess-1'))
-      .all();
-
-    const parsedPkg = JSON.parse(row.package);
-    expect(parsedPkg.title).toBe('Innovation Report');
-    expect(parsedPkg.ideas).toHaveLength(2);
-
-    const parsedArtifacts = JSON.parse(row.artifacts!);
-    expect(parsedArtifacts).toHaveLength(2);
-    expect(parsedArtifacts[0].type).toBe('chart');
+    const [row] = db.select().from(qaSheets).where(eq(qaSheets.sessionId, 'sess-1')).all();
+    expect(row.ideaId).toBe('idea-1');
+    expect(row.feasibilityScore).toBe(3.5);
+    expect(row.verdict).toBe('conditional');
+    expect(JSON.parse(row.risks)).toHaveLength(1);
   });
 
-  it('should allow null artifacts', () => {
+  it('should store multiple QA sheets per session', () => {
     insertSession();
+    db.insert(ideas)
+      .values({ id: 'idea-1', sessionId: 'sess-1', name: 'Idea 1', description: 'Desc', phase: 'converge' })
+      .run();
+    db.insert(ideas)
+      .values({ id: 'idea-2', sessionId: 'sess-1', name: 'Idea 2', description: 'Desc', phase: 'converge' })
+      .run();
 
-    db.insert(outputPackages)
+    const now = Date.now();
+    db.insert(qaSheets).values({
+      id: 'qa-1', sessionId: 'sess-1', ideaId: 'idea-1',
+      feasibilityScore: 4.0, verdict: 'strong', summary: 'Good', risks: '[]', createdAt: now,
+    }).run();
+    db.insert(qaSheets).values({
+      id: 'qa-2', sessionId: 'sess-1', ideaId: 'idea-2',
+      feasibilityScore: 2.0, verdict: 'weak', summary: 'Bad', risks: '[]', createdAt: now,
+    }).run();
+
+    const rows = db.select().from(qaSheets).where(eq(qaSheets.sessionId, 'sess-1')).all();
+    expect(rows).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7b. Idea packages storage
+// ---------------------------------------------------------------------------
+describe('Idea packages storage', () => {
+  it('should store and retrieve idea packages', () => {
+    insertSession();
+    db.insert(ideas)
+      .values({ id: 'idea-1', sessionId: 'sess-1', name: 'Idea', description: 'Desc', phase: 'converge' })
+      .run();
+
+    const now = Date.now();
+    db.insert(ideaPackages)
       .values({
+        id: 'pkg-1',
         sessionId: 'sess-1',
-        package: JSON.stringify({ ideas: [] }),
+        ideaId: 'idea-1',
+        ideaName: 'Super Idea',
+        htmlContent: '<html><body>Report</body></html>',
+        deepResearchPrompt: '## Research\nInvestigate feasibility...',
+        createdAt: now,
       })
       .run();
 
-    const [row] = db
-      .select()
-      .from(outputPackages)
-      .where(eq(outputPackages.sessionId, 'sess-1'))
-      .all();
-
-    expect(row.artifacts).toBeNull();
+    const [row] = db.select().from(ideaPackages).where(eq(ideaPackages.sessionId, 'sess-1')).all();
+    expect(row.ideaId).toBe('idea-1');
+    expect(row.ideaName).toBe('Super Idea');
+    expect(row.htmlContent).toContain('<html>');
+    expect(row.deepResearchPrompt).toContain('## Research');
   });
 });
 
@@ -624,12 +671,34 @@ describe('Data integrity', () => {
     }).toThrow();
   });
 
-  it('should reject inserting an output_package without a valid session', () => {
+  it('should reject inserting a qa_sheet without a valid session', () => {
     expect(() => {
-      db.insert(outputPackages)
+      db.insert(qaSheets)
         .values({
+          id: 'qa-orphan',
           sessionId: 'nonexistent-session',
-          package: JSON.stringify({}),
+          ideaId: 'idea-1',
+          feasibilityScore: 3.0,
+          verdict: 'conditional',
+          summary: 'Test',
+          risks: '[]',
+          createdAt: Date.now(),
+        })
+        .run();
+    }).toThrow();
+  });
+
+  it('should reject inserting an idea_package without a valid session', () => {
+    expect(() => {
+      db.insert(ideaPackages)
+        .values({
+          id: 'pkg-orphan',
+          sessionId: 'nonexistent-session',
+          ideaId: 'idea-1',
+          ideaName: 'Orphan',
+          htmlContent: '<html></html>',
+          deepResearchPrompt: 'prompt',
+          createdAt: Date.now(),
         })
         .run();
     }).toThrow();
@@ -837,7 +906,9 @@ describe('Index existence', () => {
     const indexNames = result.map((r) => r.name);
     expect(indexNames).toContain('idx_ideas_session');
     expect(indexNames).toContain('idx_ideas_phase');
+    expect(indexNames).toContain('idx_qa_sheets_session');
+    expect(indexNames).toContain('idx_idea_packages_session');
     expect(indexNames).toContain('idx_event_log_session');
-    expect(indexNames).toHaveLength(3);
+    expect(indexNames).toHaveLength(5);
   });
 });

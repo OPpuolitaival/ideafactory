@@ -7,7 +7,10 @@ import { RubricSchema, SessionConfigSchema, STAGE_ORDER } from '@ideafactory/sha
 import type { Stage } from '@ideafactory/shared';
 import { getAllMethods, loadConfig } from '../config/index.js';
 import { runPipeline } from '../agents/pipeline.js';
+import { runQAForIdeas } from '../agents/qa.js';
+import { packageIdeas } from '../agents/packaging.js';
 import { pipelineRegistry } from '../agents/registry.js';
+import { sseManager } from '../sse/index.js';
 
 const sessionRouter = router({
   start: publicProcedure
@@ -144,10 +147,15 @@ const sessionRouter = router({
       .from(schema.ideas)
       .where(eq(schema.ideas.sessionId, input.id));
 
-    const [output] = await ctx.db
+    const qaSheetRows = await ctx.db
       .select()
-      .from(schema.outputPackages)
-      .where(eq(schema.outputPackages.sessionId, input.id));
+      .from(schema.qaSheets)
+      .where(eq(schema.qaSheets.sessionId, input.id));
+
+    const ideaPackageRows = await ctx.db
+      .select()
+      .from(schema.ideaPackages)
+      .where(eq(schema.ideaPackages.sessionId, input.id));
 
     const eventLogRows = await ctx.db
       .select()
@@ -176,12 +184,11 @@ const sessionRouter = router({
         ...row,
         data: row.data ? JSON.parse(row.data) : null,
       })),
-      output: output
-        ? {
-            package: JSON.parse(output.package),
-            artifacts: output.artifacts ? JSON.parse(output.artifacts) : null,
-          }
-        : null,
+      qaSheets: qaSheetRows.map((row) => ({
+        ...row,
+        risks: JSON.parse(row.risks),
+      })),
+      ideaPackages: ideaPackageRows,
       eventLog: eventLogRows.map((row) => ({
         ...row,
         data: JSON.parse(row.data),
@@ -314,14 +321,28 @@ const sessionRouter = router({
         });
       }
 
-      // Copy output
-      const [output] = await ctx.db
+      // Copy QA sheets
+      const qaRows = await ctx.db
         .select()
-        .from(schema.outputPackages)
-        .where(eq(schema.outputPackages.sessionId, input.id));
-      if (output) {
-        await ctx.db.insert(schema.outputPackages).values({
-          ...output,
+        .from(schema.qaSheets)
+        .where(eq(schema.qaSheets.sessionId, input.id));
+      for (const row of qaRows) {
+        await ctx.db.insert(schema.qaSheets).values({
+          ...row,
+          id: nanoid(12),
+          sessionId: newId,
+        });
+      }
+
+      // Copy idea packages
+      const pkgRows = await ctx.db
+        .select()
+        .from(schema.ideaPackages)
+        .where(eq(schema.ideaPackages.sessionId, input.id));
+      for (const row of pkgRows) {
+        await ctx.db.insert(schema.ideaPackages).values({
+          ...row,
+          id: nanoid(12),
           sessionId: newId,
         });
       }
@@ -347,7 +368,7 @@ const sessionRouter = router({
     .input(
       z.object({
         id: z.string(),
-        toStage: z.enum(['taxonomy', 'methods', 'rubric', 'factory', 'output']),
+        toStage: z.enum(['taxonomy', 'methods', 'rubric', 'factory']),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -380,11 +401,9 @@ const sessionRouter = router({
         await ctx.db.delete(schema.ideas).where(eq(schema.ideas.sessionId, input.id));
       }
 
-      if (stageIdx < STAGE_ORDER.indexOf('output')) {
-        await ctx.db
-          .delete(schema.outputPackages)
-          .where(eq(schema.outputPackages.sessionId, input.id));
-      }
+      // Always clean QA sheets and idea packages on rollback
+      await ctx.db.delete(schema.qaSheets).where(eq(schema.qaSheets.sessionId, input.id));
+      await ctx.db.delete(schema.ideaPackages).where(eq(schema.ideaPackages.sessionId, input.id));
 
       // Always clear event log on rollback
       await ctx.db.delete(schema.eventLog).where(eq(schema.eventLog.sessionId, input.id));
@@ -418,7 +437,6 @@ const sessionRouter = router({
       await new Promise((r) => setTimeout(r, 200));
 
       // Clean up data for the current stage before retrying.
-      // This prevents UNIQUE constraint errors on re-insert.
       if (stage === 'taxonomy') {
         await ctx.db
           .delete(schema.taxonomyTrees)
@@ -435,10 +453,12 @@ const sessionRouter = router({
         await ctx.db
           .delete(schema.ideas)
           .where(eq(schema.ideas.sessionId, input.id));
-      } else if (stage === 'output') {
         await ctx.db
-          .delete(schema.outputPackages)
-          .where(eq(schema.outputPackages.sessionId, input.id));
+          .delete(schema.qaSheets)
+          .where(eq(schema.qaSheets.sessionId, input.id));
+        await ctx.db
+          .delete(schema.ideaPackages)
+          .where(eq(schema.ideaPackages.sessionId, input.id));
       }
 
       // Clear event log for this stage (preserve prior stage events)
@@ -457,11 +477,9 @@ const sessionRouter = router({
       }
 
       if (cutoffId !== null) {
-        // Delete all events from the stage_start onwards
         await ctx.db.delete(schema.eventLog).where(
           eq(schema.eventLog.sessionId, input.id),
         );
-        // Re-insert events before the cutoff
         for (const row of eventLogRows) {
           if (row.id < cutoffId) {
             await ctx.db.insert(schema.eventLog).values({
@@ -473,7 +491,6 @@ const sessionRouter = router({
           }
         }
       } else {
-        // No stage_start found — clear all events for safety
         await ctx.db
           .delete(schema.eventLog)
           .where(eq(schema.eventLog.sessionId, input.id));
@@ -482,6 +499,114 @@ const sessionRouter = router({
       // Re-fire the pipeline
       runPipeline(input.id, stage).catch((err) => {
         console.error(`Pipeline retry error for session ${input.id}:`, err);
+      });
+
+      return { success: true };
+    }),
+
+  runQA: publicProcedure
+    .input(z.object({ sessionId: z.string(), ideaIds: z.array(z.string()) }))
+    .mutation(async ({ ctx, input }) => {
+      const [session] = await ctx.db
+        .select()
+        .from(schema.sessions)
+        .where(eq(schema.sessions.id, input.sessionId));
+
+      if (!session) throw new Error('Session not found');
+      if (session.status !== 'factory') throw new Error('Session must be in factory stage');
+
+      const [rubricRow] = await ctx.db
+        .select()
+        .from(schema.rubrics)
+        .where(eq(schema.rubrics.sessionId, input.sessionId));
+
+      const rubric = rubricRow ? JSON.parse(rubricRow.rubric) : null;
+      if (!rubric) throw new Error('No rubric found');
+
+      const sessionConfig = session.config ? JSON.parse(session.config) : {};
+      const config = loadConfig();
+      const model = sessionConfig.models?.analyst ?? config.models.analyst;
+
+      const controller = pipelineRegistry.register(`${input.sessionId}:qa`);
+
+      // Fire-and-forget
+      runQAForIdeas({
+        sessionId: input.sessionId,
+        ideaIds: input.ideaIds,
+        rubric,
+        model,
+        signal: controller.signal,
+      }).catch((err) => {
+        if (err instanceof Error && err.name === 'AbortError') return;
+        console.error(`QA error for session ${input.sessionId}:`, err);
+        sseManager.emit(input.sessionId, {
+          type: 'status:error',
+          data: { stage: 'factory', error: err instanceof Error ? err.message : 'QA failed' },
+        });
+      }).finally(() => {
+        pipelineRegistry.complete(`${input.sessionId}:qa`);
+      });
+
+      return { success: true };
+    }),
+
+  packageIdeas: publicProcedure
+    .input(z.object({ sessionId: z.string(), ideaIds: z.array(z.string()) }))
+    .mutation(async ({ ctx, input }) => {
+      const [session] = await ctx.db
+        .select()
+        .from(schema.sessions)
+        .where(eq(schema.sessions.id, input.sessionId));
+
+      if (!session) throw new Error('Session not found');
+      if (session.status !== 'factory') throw new Error('Session must be in factory stage');
+
+      const sessionConfig = session.config ? JSON.parse(session.config) : {};
+      const config = loadConfig();
+      const model = sessionConfig.models?.analyst ?? config.models.analyst;
+
+      const controller = pipelineRegistry.register(`${input.sessionId}:package`);
+
+      // Fire-and-forget
+      packageIdeas({
+        sessionId: input.sessionId,
+        ideaIds: input.ideaIds,
+        domain: session.domain,
+        coordinate: session.coordinate ?? '',
+        model,
+        signal: controller.signal,
+      }).catch((err) => {
+        if (err instanceof Error && err.name === 'AbortError') return;
+        console.error(`Packaging error for session ${input.sessionId}:`, err);
+        sseManager.emit(input.sessionId, {
+          type: 'status:error',
+          data: { stage: 'factory', error: err instanceof Error ? err.message : 'Packaging failed' },
+        });
+      }).finally(() => {
+        pipelineRegistry.complete(`${input.sessionId}:package`);
+      });
+
+      return { success: true };
+    }),
+
+  completeSession: publicProcedure
+    .input(z.object({ sessionId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const [session] = await ctx.db
+        .select()
+        .from(schema.sessions)
+        .where(eq(schema.sessions.id, input.sessionId));
+
+      if (!session) throw new Error('Session not found');
+
+      await ctx.db
+        .update(schema.sessions)
+        .set({ status: 'completed', updatedAt: Date.now() })
+        .where(eq(schema.sessions.id, input.sessionId));
+
+      sseManager.emit(input.sessionId, {
+        type: 'status:stage_complete',
+        data: { stage: 'factory', next: 'completed' },
       });
 
       return { success: true };

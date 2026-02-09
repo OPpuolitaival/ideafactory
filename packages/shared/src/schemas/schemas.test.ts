@@ -4,7 +4,7 @@ import { MethodSchema, MethodRecommendationSchema } from './methods.js';
 import { RubricSchema } from './rubric.js';
 import { RawIdeaSchema, ScoredIdeaSchema } from './ideas.js';
 import { QAResultSchema } from './qa.js';
-import { OutputPackageSchema, VisualArtifactSchema } from './output.js';
+import { IdeaPackageSchema } from './packaging.js';
 import {
   StageSchema,
   FactoryPhaseSchema,
@@ -530,156 +530,42 @@ describe('QAResultSchema', () => {
 });
 
 // ---------------------------------------------------------------------------
-// OutputPackageSchema
+// IdeaPackageSchema
 // ---------------------------------------------------------------------------
-describe('OutputPackageSchema', () => {
-  const validOutput = {
-    concepts: [
-      {
-        rank: 1,
-        name: 'Top Concept',
-        description: 'Best idea',
-        pros: ['Novel', 'Feasible'],
-        cons: ['Expensive'],
-        openQuestions: ['Will users like it?'],
-        nextSteps: ['Prototype'],
-        qaVerdict: 'strong',
-      },
-    ],
-    overallInsights: 'Great session',
-    suggestedNextSprint: ['Explore materials'],
-    sessionMetadata: {
-      domain: 'Consumer electronics',
-      coordinate: 'Portable speaker',
-      methods: ['First Principles', 'Biomimicry'],
-      methodCount: 3,
-      totalIdeasGenerated: 45,
-      totalIdeasSurvived: 5,
-      duration: 120000,
-    },
+describe('IdeaPackageSchema', () => {
+  const validPackage = {
+    ideaId: 'idea-1',
+    ideaName: 'Super Widget',
+    htmlContent: '<html><body>Report</body></html>',
+    deepResearchPrompt: '## Research Prompt\nInvestigate feasibility...',
   };
 
-  it('accepts a complete output package', () => {
-    const result = OutputPackageSchema.safeParse(validOutput);
+  it('accepts a valid idea package', () => {
+    const result = IdeaPackageSchema.safeParse(validPackage);
     expect(result.success).toBe(true);
   });
 
-  it('rejects missing concepts section', () => {
-    const { concepts, ...rest } = validOutput;
-    const result = OutputPackageSchema.safeParse(rest);
+  it('rejects missing ideaId', () => {
+    const { ideaId, ...rest } = validPackage;
+    const result = IdeaPackageSchema.safeParse(rest);
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing overallInsights section', () => {
-    const { overallInsights, ...rest } = validOutput;
-    const result = OutputPackageSchema.safeParse(rest);
+  it('rejects missing ideaName', () => {
+    const { ideaName, ...rest } = validPackage;
+    const result = IdeaPackageSchema.safeParse(rest);
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing sessionMetadata section', () => {
-    const { sessionMetadata, ...rest } = validOutput;
-    const result = OutputPackageSchema.safeParse(rest);
+  it('rejects missing htmlContent', () => {
+    const { htmlContent, ...rest } = validPackage;
+    const result = IdeaPackageSchema.safeParse(rest);
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing suggestedNextSprint section', () => {
-    const { suggestedNextSprint, ...rest } = validOutput;
-    const result = OutputPackageSchema.safeParse(rest);
-    expect(result.success).toBe(false);
-  });
-
-  it('validates sessionMetadata completeness - rejects missing domain', () => {
-    const { domain, ...metaRest } = validOutput.sessionMetadata;
-    const output = { ...validOutput, sessionMetadata: metaRest };
-    const result = OutputPackageSchema.safeParse(output);
-    expect(result.success).toBe(false);
-  });
-
-  it('validates sessionMetadata completeness - rejects missing methodCount', () => {
-    const { methodCount, ...metaRest } = validOutput.sessionMetadata;
-    const output = { ...validOutput, sessionMetadata: metaRest };
-    const result = OutputPackageSchema.safeParse(output);
-    expect(result.success).toBe(false);
-  });
-
-  it('validates sessionMetadata completeness - rejects missing duration', () => {
-    const { duration, ...metaRest } = validOutput.sessionMetadata;
-    const output = { ...validOutput, sessionMetadata: metaRest };
-    const result = OutputPackageSchema.safeParse(output);
-    expect(result.success).toBe(false);
-  });
-
-  it('validates concept qaVerdict enum', () => {
-    const output = {
-      ...validOutput,
-      concepts: [{ ...validOutput.concepts[0], qaVerdict: 'amazing' }],
-    };
-    const result = OutputPackageSchema.safeParse(output);
-    expect(result.success).toBe(false);
-  });
-
-  it('accepts empty concepts array', () => {
-    const output = { ...validOutput, concepts: [] };
-    const result = OutputPackageSchema.safeParse(output);
-    expect(result.success).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// VisualArtifactSchema
-// ---------------------------------------------------------------------------
-describe('VisualArtifactSchema', () => {
-  const validArtifact = {
-    type: 'radar_chart',
-    format: 'svg',
-    content: '<svg>...</svg>',
-    label: 'Concept Radar',
-  };
-
-  it('accepts a valid artifact', () => {
-    const result = VisualArtifactSchema.safeParse(validArtifact);
-    expect(result.success).toBe(true);
-  });
-
-  it('accepts all valid type enum values', () => {
-    for (const type of ['radar_chart', 'concept_sketch', 'report_page'] as const) {
-      const result = VisualArtifactSchema.safeParse({ ...validArtifact, type });
-      expect(result.success).toBe(true);
-    }
-  });
-
-  it('rejects invalid type enum value', () => {
-    const result = VisualArtifactSchema.safeParse({
-      ...validArtifact,
-      type: 'bar_chart',
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('accepts all valid format enum values', () => {
-    for (const format of ['svg', 'html'] as const) {
-      const result = VisualArtifactSchema.safeParse({ ...validArtifact, format });
-      expect(result.success).toBe(true);
-    }
-  });
-
-  it('rejects invalid format enum value', () => {
-    const result = VisualArtifactSchema.safeParse({
-      ...validArtifact,
-      format: 'png',
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects missing label', () => {
-    const { label, ...rest } = validArtifact;
-    const result = VisualArtifactSchema.safeParse(rest);
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects missing content', () => {
-    const { content, ...rest } = validArtifact;
-    const result = VisualArtifactSchema.safeParse(rest);
+  it('rejects missing deepResearchPrompt', () => {
+    const { deepResearchPrompt, ...rest } = validPackage;
+    const result = IdeaPackageSchema.safeParse(rest);
     expect(result.success).toBe(false);
   });
 });
@@ -773,7 +659,7 @@ describe('SessionConfigSchema', () => {
 // ---------------------------------------------------------------------------
 describe('StageSchema', () => {
   it('accepts all valid stage values', () => {
-    const validStages = ['taxonomy', 'methods', 'rubric', 'factory', 'output', 'completed'];
+    const validStages = ['taxonomy', 'methods', 'rubric', 'factory', 'completed'];
     for (const stage of validStages) {
       const result = StageSchema.safeParse(stage);
       expect(result.success).toBe(true);
@@ -798,7 +684,7 @@ describe('StageSchema', () => {
 
 describe('FactoryPhaseSchema', () => {
   it('accepts all valid factory phase values', () => {
-    for (const phase of ['diverge', 'converge', 'evolve', 'qa'] as const) {
+    for (const phase of ['diverge', 'converge', 'evolve', 'interactive'] as const) {
       const result = FactoryPhaseSchema.safeParse(phase);
       expect(result.success).toBe(true);
     }
@@ -889,7 +775,6 @@ describe('Constants', () => {
       'methods',
       'rubric',
       'factory',
-      'output',
       'completed',
     ]);
   });

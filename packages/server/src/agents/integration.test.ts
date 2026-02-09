@@ -238,59 +238,11 @@ const rescoredEvolved = [
   },
 ];
 
-// Stage 4d: QA – 1 result for the evolved concept
-const qaResults = [
-  {
-    conceptId: 'evolved-0',
-    feasibilityScore: 5,
-    risks: [
-      { category: 'Technical', description: 'Battery management', severity: 'medium' as const, mitigation: 'Thermal system' },
-      { category: 'Political', description: 'City partnership needed', severity: 'medium' as const, mitigation: 'Pilot programs' },
-      { category: 'Competition', description: 'Ride-share incumbents', severity: 'high' as const, mitigation: 'Hyperlocal focus' },
-    ],
-    verdict: 'strong' as const,
-    summary: 'Strong concept combining solar and hub approaches with high scalability.',
-  },
-];
-
-// Stage 5: Output package
-const outputPackage = {
-  concepts: [
-    {
-      rank: 1,
-      name: 'SolarHub',
-      description: 'Solar-powered pods integrated with neighborhood sharing hubs',
-      pros: ['Novel combination', 'Proven components', 'Scalable'],
-      cons: ['Battery management', 'City partnership needed'],
-      openQuestions: ['Which cities to pilot first?'],
-      nextSteps: ['City partnership outreach', 'Prototype build'],
-      qaVerdict: 'strong' as const,
-    },
-  ],
-  overallInsights: 'Urban mobility innovation favors infrastructure-light solutions that integrate with existing transit.',
-  suggestedNextSprint: ['Build SolarHub pilot proposal', 'Design prototype spec'],
-  sessionMetadata: {
-    domain: 'Sustainable Urban Mobility',
-    coordinate: 'Electric Vehicles > Personal EVs',
-    methods: ['First Principles', 'TRIZ'],
-    methodCount: 2,
-    totalIdeasGenerated: 4,
-    totalIdeasSurvived: 1,
-    duration: 45000,
-  },
-};
-
-// Stage 5: Visual artifacts
-const visualArtifacts = [
-  { type: 'radar_chart' as const, format: 'svg' as const, content: '<svg viewBox="0 0 400 400"><circle cx="200" cy="200" r="150" fill="none" stroke="#666"/></svg>', label: 'Concept Comparison Radar' },
-  { type: 'concept_sketch' as const, format: 'svg' as const, content: '<svg viewBox="0 0 300 200"><rect x="50" y="50" width="200" height="100" fill="none" stroke="#0ff"/></svg>', label: 'SolarHub Sketch' },
-  { type: 'report_page' as const, format: 'html' as const, content: '<html><body style="background:#0a0a0f;color:#fff"><h1>Session Report</h1></body></html>', label: 'Full Report' },
-];
 
 // ---------------------------------------------------------------------------
 // Setup mock responses in order:
-// taxonomy(1) + methods(1) + rubric(1) + factory(6) + output(2) = 11 calls
-// Factory: 2 diverge + 1 converge batch + 1 evolution + 1 rescore + 1 QA = 6
+// taxonomy(1) + methods(1) + rubric(1) + factory(5) = 8 calls
+// Factory: 2 diverge + 1 converge batch + 1 evolution + 1 rescore = 5
 // ---------------------------------------------------------------------------
 
 function setupAllMocks() {
@@ -310,17 +262,11 @@ function setupAllMocks() {
     // Stage 4c: Evolution worker 0 (1 pair)
     .mockReturnValueOnce(queryResult(JSON.stringify(evolvedConcepts)))
     // Stage 4c: Rescore batch (1 evolved concept)
-    .mockReturnValueOnce(queryResult(JSON.stringify(rescoredEvolved)))
-    // Stage 4d: QA
-    .mockReturnValueOnce(queryResult(JSON.stringify(qaResults)))
-    // Stage 5: Output package
-    .mockReturnValueOnce(queryResult(JSON.stringify(outputPackage)))
-    // Stage 5: Visual artifacts
-    .mockReturnValueOnce(queryResult(JSON.stringify(visualArtifacts)));
+    .mockReturnValueOnce(queryResult(JSON.stringify(rescoredEvolved)));
 }
 
 // ==========================================================================
-// Integration Test: Full Pipeline (taxonomy → methods → rubric → factory → output)
+// Integration Test: Full Pipeline (taxonomy → methods → rubric → factory)
 // ==========================================================================
 
 describe('Integration – Full Pipeline end-to-end', () => {
@@ -357,16 +303,15 @@ describe('Integration – Full Pipeline end-to-end', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 1. Full pipeline runs all 5 stages sequentially without errors
+  // 1. Full pipeline runs all 4 stages sequentially without errors
   // -----------------------------------------------------------------------
-  it('runs all 5 stages sequentially without errors', async () => {
+  it('runs all 4 stages sequentially without errors', async () => {
     setupAllMocks();
 
     await runPipeline(SESSION_ID, 'taxonomy');
     await runPipeline(SESSION_ID, 'methods');
     await runPipeline(SESSION_ID, 'rubric');
     await runPipeline(SESSION_ID, 'factory');
-    await runPipeline(SESSION_ID, 'output');
 
     // Should not have emitted any status:error events
     const errorEvents = emittedEvents.filter((e) => e.event.type === 'status:error');
@@ -374,19 +319,18 @@ describe('Integration – Full Pipeline end-to-end', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 2. Makes exactly 11 LLM calls across all stages
+  // 2. Makes exactly 8 LLM calls across all stages
   // -----------------------------------------------------------------------
-  it('makes exactly 11 LLM calls across all stages', async () => {
+  it('makes exactly 8 LLM calls across all stages', async () => {
     setupAllMocks();
 
     await runPipeline(SESSION_ID, 'taxonomy');
     await runPipeline(SESSION_ID, 'methods');
     await runPipeline(SESSION_ID, 'rubric');
     await runPipeline(SESSION_ID, 'factory');
-    await runPipeline(SESSION_ID, 'output');
 
-    // taxonomy=1, methods=1, rubric=1, factory=6 (2 div + 1 conv + 1 evo + 1 rescore + 1 qa), output=2
-    expect(mockQuery).toHaveBeenCalledTimes(11);
+    // taxonomy=1, methods=1, rubric=1, factory=5 (2 div + 1 conv + 1 evo + 1 rescore)
+    expect(mockQuery).toHaveBeenCalledTimes(8);
   });
 
   // -----------------------------------------------------------------------
@@ -452,9 +396,9 @@ describe('Integration – Full Pipeline end-to-end', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 6. Factory produces ideas in all 4 phases (diverge, converge, evolve, qa)
+  // 6. Factory produces ideas in 3 phases (diverge, converge, evolve)
   // -----------------------------------------------------------------------
-  it('factory populates all 4 idea phases in the database', async () => {
+  it('factory populates all 3 idea phases in the database', async () => {
     setupAllMocks();
 
     await runPipeline(SESSION_ID, 'taxonomy');
@@ -468,7 +412,7 @@ describe('Integration – Full Pipeline end-to-end', () => {
       .where(eq(schema.ideas.sessionId, SESSION_ID));
 
     const phases = new Set(allIdeas.map((i) => i.phase));
-    expect(phases).toEqual(new Set(['diverge', 'converge', 'evolve', 'qa']));
+    expect(phases).toEqual(new Set(['diverge', 'converge', 'evolve']));
 
     // Diverge: 2 workers x 2 ideas = 4
     const divergeRows = allIdeas.filter((i) => i.phase === 'diverge');
@@ -481,67 +425,34 @@ describe('Integration – Full Pipeline end-to-end', () => {
     // Evolve: 1 re-scored evolved concept
     const evolveRows = allIdeas.filter((i) => i.phase === 'evolve');
     expect(evolveRows).toHaveLength(1);
-
-    // QA: 1 result
-    const qaRows = allIdeas.filter((i) => i.phase === 'qa');
-    expect(qaRows).toHaveLength(1);
   });
 
   // -----------------------------------------------------------------------
-  // 7. Output package and artifacts are persisted
+  // 7. Pipeline does not advance session status (that's the tRPC layer's job)
   // -----------------------------------------------------------------------
-  it('persists output package and visual artifacts', async () => {
+  it('pipeline does not auto-advance session status', async () => {
     setupAllMocks();
 
     await runPipeline(SESSION_ID, 'taxonomy');
     await runPipeline(SESSION_ID, 'methods');
     await runPipeline(SESSION_ID, 'rubric');
     await runPipeline(SESSION_ID, 'factory');
-    await runPipeline(SESSION_ID, 'output');
-
-    const [outputRow] = await testDb
-      .select()
-      .from(schema.outputPackages)
-      .where(eq(schema.outputPackages.sessionId, SESSION_ID));
-
-    expect(outputRow).toBeDefined();
-
-    const storedPkg = JSON.parse(outputRow.package);
-    expect(storedPkg.concepts).toHaveLength(1);
-    expect(storedPkg.concepts[0].name).toBe('SolarHub');
-    expect(storedPkg.overallInsights).toContain('infrastructure-light');
-
-    const storedArtifacts = JSON.parse(outputRow.artifacts!);
-    expect(storedArtifacts).toHaveLength(3);
-    expect(storedArtifacts.map((a: { type: string }) => a.type)).toEqual([
-      'radar_chart',
-      'concept_sketch',
-      'report_page',
-    ]);
-  });
-
-  // -----------------------------------------------------------------------
-  // 8. Session status is 'completed' after full pipeline
-  // -----------------------------------------------------------------------
-  it('marks session as completed after output stage', async () => {
-    setupAllMocks();
-
-    await runPipeline(SESSION_ID, 'taxonomy');
-    await runPipeline(SESSION_ID, 'methods');
-    await runPipeline(SESSION_ID, 'rubric');
-    await runPipeline(SESSION_ID, 'factory');
-    await runPipeline(SESSION_ID, 'output');
 
     const [session] = await testDb
       .select()
       .from(schema.sessions)
       .where(eq(schema.sessions.id, SESSION_ID));
 
-    expect(session.status).toBe('completed');
+    // Pipeline never updates session.status — tRPC session.advance does that
+    expect(session.status).toBe('taxonomy');
+
+    // But no errors should have occurred
+    const errorEvents = emittedEvents.filter((e) => e.event.type === 'status:error');
+    expect(errorEvents).toHaveLength(0);
   });
 
   // -----------------------------------------------------------------------
-  // 9. All 5 stage_complete events fire in correct order
+  // 9. Stage_complete events fire for taxonomy, methods, rubric (factory stays interactive)
   // -----------------------------------------------------------------------
   it('emits status:stage_complete events in correct order', async () => {
     setupAllMocks();
@@ -550,7 +461,6 @@ describe('Integration – Full Pipeline end-to-end', () => {
     await runPipeline(SESSION_ID, 'methods');
     await runPipeline(SESSION_ID, 'rubric');
     await runPipeline(SESSION_ID, 'factory');
-    await runPipeline(SESSION_ID, 'output');
 
     const stageCompletes = emittedEvents
       .filter(
@@ -559,13 +469,12 @@ describe('Integration – Full Pipeline end-to-end', () => {
       )
       .map((e) => e.event.data as { stage: string; next: string });
 
-    expect(stageCompletes).toHaveLength(5);
+    // Factory does not emit stage_complete (stays in interactive mode)
+    expect(stageCompletes).toHaveLength(3);
     expect(stageCompletes).toEqual([
       { stage: 'taxonomy', next: 'methods' },
       { stage: 'methods', next: 'rubric' },
       { stage: 'rubric', next: 'factory' },
-      { stage: 'factory', next: 'output' },
-      { stage: 'output', next: 'completed' },
     ]);
   });
 
@@ -579,7 +488,6 @@ describe('Integration – Full Pipeline end-to-end', () => {
     await runPipeline(SESSION_ID, 'methods');
     await runPipeline(SESSION_ID, 'rubric');
     await runPipeline(SESSION_ID, 'factory');
-    await runPipeline(SESSION_ID, 'output');
 
     const eventTypes = new Set(
       emittedEvents
@@ -594,8 +502,7 @@ describe('Integration – Full Pipeline end-to-end', () => {
     expect(eventTypes).toContain('data:idea_stream');
     expect(eventTypes).toContain('data:convergence_result');
     expect(eventTypes).toContain('data:evolution_result');
-    expect(eventTypes).toContain('data:qa_result');
-    expect(eventTypes).toContain('data:output_package');
+    expect(eventTypes).toContain('factory:interactive');
 
     // Lifecycle events
     expect(eventTypes).toContain('agent:thought');
@@ -641,24 +548,7 @@ describe('Integration – Full Pipeline end-to-end', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 13. Output stage reads all ideas from DB
-  // -----------------------------------------------------------------------
-  it('output stage receives ideas from all phases', async () => {
-    setupAllMocks();
-
-    await runPipeline(SESSION_ID, 'taxonomy');
-    await runPipeline(SESSION_ID, 'methods');
-    await runPipeline(SESSION_ID, 'rubric');
-    await runPipeline(SESSION_ID, 'factory');
-    await runPipeline(SESSION_ID, 'output');
-
-    // Output call (10th, index 9) should reference evolved concept
-    const outputPrompt = mockQuery.mock.calls[9][0].prompt;
-    expect(outputPrompt).toContain('SolarHub');
-  });
-
-  // -----------------------------------------------------------------------
-  // 14. All DB tables populated after full pipeline
+  // 13. All DB tables populated after full pipeline
   // -----------------------------------------------------------------------
   it('populates all database tables after full pipeline', async () => {
     setupAllMocks();
@@ -667,12 +557,10 @@ describe('Integration – Full Pipeline end-to-end', () => {
     await runPipeline(SESSION_ID, 'methods');
     await runPipeline(SESSION_ID, 'rubric');
     await runPipeline(SESSION_ID, 'factory');
-    await runPipeline(SESSION_ID, 'output');
 
-    // Sessions
+    // Sessions (pipeline doesn't update status — stays at initial value)
     const sessions = await testDb.select().from(schema.sessions);
     expect(sessions).toHaveLength(1);
-    expect(sessions[0].status).toBe('completed');
 
     // Taxonomy trees
     const trees = await testDb.select().from(schema.taxonomyTrees);
@@ -686,14 +574,9 @@ describe('Integration – Full Pipeline end-to-end', () => {
     const rubrics = await testDb.select().from(schema.rubrics);
     expect(rubrics).toHaveLength(1);
 
-    // Ideas (across all phases): 4 diverge + 4 converge + 1 evolve + 1 qa = 10
+    // Ideas (across all phases): 4 diverge + 4 converge + 1 evolve = 9
     const ideas = await testDb.select().from(schema.ideas);
-    expect(ideas.length).toBeGreaterThanOrEqual(10);
-
-    // Output packages
-    const outputs = await testDb.select().from(schema.outputPackages);
-    expect(outputs).toHaveLength(1);
-    expect(outputs[0].artifacts).toBeDefined();
+    expect(ideas.length).toBeGreaterThanOrEqual(9);
   });
 
   // -----------------------------------------------------------------------
@@ -738,7 +621,6 @@ describe('Integration – Full Pipeline end-to-end', () => {
     await runPipeline(SESSION_ID, 'methods');
     await runPipeline(SESSION_ID, 'rubric');
     await runPipeline(SESSION_ID, 'factory');
-    await runPipeline(SESSION_ID, 'output');
 
     // Call 0: taxonomy → navigator model
     expect(mockQuery.mock.calls[0][0].options.model).toBe('claude-haiku-4-20250414');
@@ -753,15 +635,10 @@ describe('Integration – Full Pipeline end-to-end', () => {
     expect(mockQuery.mock.calls[3][0].options.model).toBe('claude-sonnet-4-20250514');
     expect(mockQuery.mock.calls[4][0].options.model).toBe('claude-sonnet-4-20250514');
 
-    // Calls 5-8: factory converge/evolve/rescore/qa → analyst model
+    // Calls 5-7: factory converge/evolve/rescore → analyst model
     expect(mockQuery.mock.calls[5][0].options.model).toBe('claude-sonnet-4-20250514');
     expect(mockQuery.mock.calls[6][0].options.model).toBe('claude-sonnet-4-20250514');
     expect(mockQuery.mock.calls[7][0].options.model).toBe('claude-sonnet-4-20250514');
-    expect(mockQuery.mock.calls[8][0].options.model).toBe('claude-sonnet-4-20250514');
-
-    // Calls 9-10: output → analyst model
-    expect(mockQuery.mock.calls[9][0].options.model).toBe('claude-sonnet-4-20250514');
-    expect(mockQuery.mock.calls[10][0].options.model).toBe('claude-sonnet-4-20250514');
   });
 
   // -----------------------------------------------------------------------
@@ -795,30 +672,7 @@ describe('Integration – Full Pipeline end-to-end', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 18. QA verdicts correctly set eliminated flag
-  // -----------------------------------------------------------------------
-  it('QA verdicts correctly set eliminated flag', async () => {
-    setupAllMocks();
-
-    await runPipeline(SESSION_ID, 'taxonomy');
-    await runPipeline(SESSION_ID, 'methods');
-    await runPipeline(SESSION_ID, 'rubric');
-    await runPipeline(SESSION_ID, 'factory');
-
-    const qaRows = await testDb
-      .select()
-      .from(schema.ideas)
-      .where(and(eq(schema.ideas.sessionId, SESSION_ID), eq(schema.ideas.phase, 'qa')));
-
-    // 1 verdict "strong" → eliminated=0
-    expect(qaRows).toHaveLength(1);
-    for (const row of qaRows) {
-      expect(row.eliminated).toBe(0);
-    }
-  });
-
-  // -----------------------------------------------------------------------
-  // 19. Agent thought events reference correct agent names
+  // 18. Agent thought events reference correct agent names
   // -----------------------------------------------------------------------
   it('agent thought events reference correct agent names across pipeline', async () => {
     setupAllMocks();
@@ -827,7 +681,6 @@ describe('Integration – Full Pipeline end-to-end', () => {
     await runPipeline(SESSION_ID, 'methods');
     await runPipeline(SESSION_ID, 'rubric');
     await runPipeline(SESSION_ID, 'factory');
-    await runPipeline(SESSION_ID, 'output');
 
     const thoughts = emittedEvents
       .filter((e) => e.sessionId === SESSION_ID && e.event.type === 'agent:thought')
@@ -838,7 +691,6 @@ describe('Integration – Full Pipeline end-to-end', () => {
     expect(uniqueAgents).toContain('Navigator');
     expect(uniqueAgents).toContain('Strategist');
     expect(uniqueAgents).toContain('Factory');
-    expect(uniqueAgents).toContain('Analyst');
 
     // Worker agents
     const workerAgents = thoughts.filter((a) => a.startsWith('Worker'));
@@ -895,5 +747,26 @@ describe('Integration – Full Pipeline end-to-end', () => {
     // Error event should fire for methods stage
     const errors = emittedEvents.filter((e) => e.event.type === 'status:error');
     expect(errors.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // -----------------------------------------------------------------------
+  // 22. Factory emits factory:interactive with combined pool
+  // -----------------------------------------------------------------------
+  it('factory emits factory:interactive with combined pool', async () => {
+    setupAllMocks();
+
+    await runPipeline(SESSION_ID, 'taxonomy');
+    await runPipeline(SESSION_ID, 'methods');
+    await runPipeline(SESSION_ID, 'rubric');
+    await runPipeline(SESSION_ID, 'factory');
+
+    const interactiveEvents = emittedEvents.filter(
+      (e) => e.sessionId === SESSION_ID && e.event.type === 'factory:interactive',
+    );
+
+    expect(interactiveEvents).toHaveLength(1);
+    const data = interactiveEvents[0].event.data as { combinedPool: unknown[] };
+    expect(data.combinedPool).toBeDefined();
+    expect(data.combinedPool.length).toBeGreaterThan(0);
   });
 });

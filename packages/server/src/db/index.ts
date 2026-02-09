@@ -1,6 +1,5 @@
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { sql } from 'drizzle-orm';
 import * as schema from './schema.js';
 import { getDataDir } from '../config/paths.js';
 import path from 'path';
@@ -71,14 +70,31 @@ function migrate(sqlite: Database.Database) {
       data          TEXT
     );
 
-    CREATE TABLE IF NOT EXISTS output_packages (
-      session_id    TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-      package       TEXT NOT NULL,
-      artifacts     TEXT
+    CREATE TABLE IF NOT EXISTS qa_sheets (
+      id            TEXT PRIMARY KEY,
+      session_id    TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      idea_id       TEXT NOT NULL,
+      feasibility_score REAL NOT NULL,
+      verdict       TEXT NOT NULL,
+      summary       TEXT NOT NULL,
+      risks         TEXT NOT NULL,
+      created_at    INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS idea_packages (
+      id            TEXT PRIMARY KEY,
+      session_id    TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      idea_id       TEXT NOT NULL,
+      idea_name     TEXT NOT NULL,
+      html_content  TEXT NOT NULL,
+      deep_research_prompt TEXT NOT NULL,
+      created_at    INTEGER NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_ideas_session ON ideas(session_id);
     CREATE INDEX IF NOT EXISTS idx_ideas_phase ON ideas(session_id, phase);
+    CREATE INDEX IF NOT EXISTS idx_qa_sheets_session ON qa_sheets(session_id);
+    CREATE INDEX IF NOT EXISTS idx_idea_packages_session ON idea_packages(session_id);
 
     CREATE TABLE IF NOT EXISTS event_log (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,

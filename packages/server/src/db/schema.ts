@@ -45,18 +45,35 @@ export const ideas = sqliteTable('ideas', {
   name: text('name').notNull(),
   description: text('description').notNull(),
   probability: text('probability'),
-  phase: text('phase').notNull(), // 'diverge' | 'converge' | 'evolve' | 'qa'
+  phase: text('phase').notNull(), // 'diverge' | 'converge' | 'evolve'
   score: real('score'),
   eliminated: integer('eliminated').default(0),
   data: text('data'), // JSON: full structured data per phase
 });
 
-export const outputPackages = sqliteTable('output_packages', {
+export const qaSheets = sqliteTable('qa_sheets', {
+  id: text('id').primaryKey(),
   sessionId: text('session_id')
-    .primaryKey()
+    .notNull()
     .references(() => sessions.id, { onDelete: 'cascade' }),
-  package: text('package').notNull(), // JSON: OutputPackage
-  artifacts: text('artifacts'), // JSON: VisualArtifact[]
+  ideaId: text('idea_id').notNull(),
+  feasibilityScore: real('feasibility_score').notNull(),
+  verdict: text('verdict').notNull(),
+  summary: text('summary').notNull(),
+  risks: text('risks').notNull(), // JSON array
+  createdAt: integer('created_at').notNull(),
+});
+
+export const ideaPackages = sqliteTable('idea_packages', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id')
+    .notNull()
+    .references(() => sessions.id, { onDelete: 'cascade' }),
+  ideaId: text('idea_id').notNull(),
+  ideaName: text('idea_name').notNull(),
+  htmlContent: text('html_content').notNull(),
+  deepResearchPrompt: text('deep_research_prompt').notNull(),
+  createdAt: integer('created_at').notNull(),
 });
 
 export const eventLog = sqliteTable('event_log', {

@@ -78,10 +78,9 @@ export const STAGES: { id: Stage; label: string; number: number }[] = [
   { id: 'methods', label: 'Methods', number: 2 },
   { id: 'rubric', label: 'Rubric', number: 3 },
   { id: 'factory', label: 'Factory', number: 4 },
-  { id: 'output', label: 'Output', number: 5 },
 ];
 
-export const STAGE_ORDER: Stage[] = ['taxonomy', 'methods', 'rubric', 'factory', 'output', 'completed'];
+export const STAGE_ORDER: Stage[] = ['taxonomy', 'methods', 'rubric', 'factory', 'completed'];
 
 export const SSE_EVENTS = {
   AGENT_THOUGHT: 'agent:thought',
@@ -92,8 +91,9 @@ export const SSE_EVENTS = {
   IDEA_STREAM: 'data:idea_stream',
   CONVERGENCE_RESULT: 'data:convergence_result',
   EVOLUTION_RESULT: 'data:evolution_result',
-  QA_RESULT: 'data:qa_result',
-  OUTPUT_PACKAGE: 'data:output_package',
+  QA_SHEET: 'data:qa_sheet',
+  IDEA_PACKAGE: 'data:idea_package',
+  FACTORY_INTERACTIVE: 'factory:interactive',
   STAGE_COMPLETE: 'status:stage_complete',
   ERROR: 'status:error',
 } as const;

@@ -181,7 +181,8 @@ describe('session router', () => {
       expect(result.methods).toBeNull();
       expect(result.rubric).toBeNull();
       expect(result.ideas).toEqual([]);
-      expect(result.output).toBeNull();
+      expect(result.qaSheets).toEqual([]);
+      expect(result.ideaPackages).toEqual([]);
     });
 
     it('returns taxonomy data when present', async () => {
@@ -602,23 +603,52 @@ describe('session router', () => {
       expect(names).toEqual(['Another Idea', 'Great Idea']);
     });
 
-    it('copies output packages', async () => {
-      await seedSession(db, { id: 'dup-out', status: 'output' });
-      await db.insert(schema.outputPackages).values({
-        sessionId: 'dup-out',
-        package: JSON.stringify({ title: 'Final Package' }),
-        artifacts: JSON.stringify([{ type: 'image', url: 'test.png' }]),
+    it('copies qa sheets and idea packages', async () => {
+      await seedSession(db, { id: 'dup-qa', status: 'factory' });
+      await db.insert(schema.ideas).values({
+        id: 'idea-qa',
+        sessionId: 'dup-qa',
+        name: 'Test Idea',
+        description: 'Desc',
+        phase: 'converge',
+      });
+      await db.insert(schema.qaSheets).values({
+        id: 'qa-1',
+        sessionId: 'dup-qa',
+        ideaId: 'idea-qa',
+        feasibilityScore: 4.0,
+        verdict: 'strong',
+        summary: 'Good',
+        risks: JSON.stringify([]),
+        createdAt: Date.now(),
+      });
+      await db.insert(schema.ideaPackages).values({
+        id: 'pkg-1',
+        sessionId: 'dup-qa',
+        ideaId: 'idea-qa',
+        ideaName: 'Test Idea',
+        htmlContent: '<html>report</html>',
+        deepResearchPrompt: '## Research',
+        createdAt: Date.now(),
       });
 
-      const result = await caller.session.duplicate({ id: 'dup-out' });
+      const result = await caller.session.duplicate({ id: 'dup-qa' });
 
-      const [newOut] = await db
+      const newQa = await db
         .select()
-        .from(schema.outputPackages)
-        .where(eq(schema.outputPackages.sessionId, result.sessionId));
-      expect(newOut).toBeDefined();
-      expect(JSON.parse(newOut.package)).toEqual({ title: 'Final Package' });
-      expect(JSON.parse(newOut.artifacts!)).toEqual([{ type: 'image', url: 'test.png' }]);
+        .from(schema.qaSheets)
+        .where(eq(schema.qaSheets.sessionId, result.sessionId));
+      expect(newQa).toHaveLength(1);
+      expect(newQa[0].verdict).toBe('strong');
+      expect(newQa[0].id).not.toBe('qa-1');
+
+      const newPkg = await db
+        .select()
+        .from(schema.ideaPackages)
+        .where(eq(schema.ideaPackages.sessionId, result.sessionId));
+      expect(newPkg).toHaveLength(1);
+      expect(newPkg[0].ideaName).toBe('Test Idea');
+      expect(newPkg[0].id).not.toBe('pkg-1');
     });
 
     it('throws when duplicating a nonexistent session', async () => {
@@ -635,7 +665,7 @@ describe('session router', () => {
       await db.insert(schema.sessions).values({
         id,
         domain: 'full test',
-        status: 'output',
+        status: 'completed',
         coordinate: 'A > B > C',
         createdAt: now,
         updatedAt: now,
@@ -663,9 +693,24 @@ describe('session router', () => {
         description: 'desc',
         phase: 'diverge',
       });
-      await db.insert(schema.outputPackages).values({
+      await db.insert(schema.qaSheets).values({
+        id: `${id}-qa`,
         sessionId: id,
-        package: JSON.stringify({ title: 'pkg' }),
+        ideaId: `${id}-idea`,
+        feasibilityScore: 4.0,
+        verdict: 'strong',
+        summary: 'Good',
+        risks: JSON.stringify([]),
+        createdAt: now,
+      });
+      await db.insert(schema.ideaPackages).values({
+        id: `${id}-pkg`,
+        sessionId: id,
+        ideaId: `${id}-idea`,
+        ideaName: 'Test idea',
+        htmlContent: '<html>report</html>',
+        deepResearchPrompt: '## Research',
+        createdAt: now,
       });
     }
 
@@ -712,15 +757,22 @@ describe('session router', () => {
         .where(eq(schema.ideas.sessionId, 'rb-tax'));
       expect(ideaRows).toHaveLength(0);
 
-      // Output should be deleted
-      const outRows = await db
+      // QA sheets should be deleted
+      const qaRows = await db
         .select()
-        .from(schema.outputPackages)
-        .where(eq(schema.outputPackages.sessionId, 'rb-tax'));
-      expect(outRows).toHaveLength(0);
+        .from(schema.qaSheets)
+        .where(eq(schema.qaSheets.sessionId, 'rb-tax'));
+      expect(qaRows).toHaveLength(0);
+
+      // Idea packages should be deleted
+      const pkgRows = await db
+        .select()
+        .from(schema.ideaPackages)
+        .where(eq(schema.ideaPackages.sessionId, 'rb-tax'));
+      expect(pkgRows).toHaveLength(0);
     });
 
-    it('rolling back to rubric preserves taxonomy, methods, and rubric but clears ideas and output', async () => {
+    it('rolling back to rubric preserves taxonomy, methods, and rubric but clears ideas and packages', async () => {
       await seedFullSession(db, 'rb-rub');
 
       await caller.session.rollback({ id: 'rb-rub', toStage: 'rubric' });
@@ -759,15 +811,22 @@ describe('session router', () => {
         .where(eq(schema.ideas.sessionId, 'rb-rub'));
       expect(ideaRows).toHaveLength(0);
 
-      // Output cleared
-      const outRows = await db
+      // QA sheets cleared
+      const qaRows = await db
         .select()
-        .from(schema.outputPackages)
-        .where(eq(schema.outputPackages.sessionId, 'rb-rub'));
-      expect(outRows).toHaveLength(0);
+        .from(schema.qaSheets)
+        .where(eq(schema.qaSheets.sessionId, 'rb-rub'));
+      expect(qaRows).toHaveLength(0);
+
+      // Idea packages cleared
+      const pkgRows = await db
+        .select()
+        .from(schema.ideaPackages)
+        .where(eq(schema.ideaPackages.sessionId, 'rb-rub'));
+      expect(pkgRows).toHaveLength(0);
     });
 
-    it('rolling back to factory preserves taxonomy, methods, rubric, ideas but clears output', async () => {
+    it('rolling back to factory preserves taxonomy, methods, rubric, ideas but clears QA and packages', async () => {
       await seedFullSession(db, 'rb-fac');
 
       await caller.session.rollback({ id: 'rb-fac', toStage: 'factory' });
@@ -806,53 +865,22 @@ describe('session router', () => {
         .where(eq(schema.ideas.sessionId, 'rb-fac'));
       expect(ideaRows).toHaveLength(1);
 
-      // Output cleared
-      const outRows = await db
+      // QA sheets cleared
+      const qaRows = await db
         .select()
-        .from(schema.outputPackages)
-        .where(eq(schema.outputPackages.sessionId, 'rb-fac'));
-      expect(outRows).toHaveLength(0);
+        .from(schema.qaSheets)
+        .where(eq(schema.qaSheets.sessionId, 'rb-fac'));
+      expect(qaRows).toHaveLength(0);
+
+      // Idea packages cleared
+      const pkgRows = await db
+        .select()
+        .from(schema.ideaPackages)
+        .where(eq(schema.ideaPackages.sessionId, 'rb-fac'));
+      expect(pkgRows).toHaveLength(0);
     });
 
-    it('rolling back to output preserves everything including output', async () => {
-      await seedFullSession(db, 'rb-out');
-
-      await caller.session.rollback({ id: 'rb-out', toStage: 'output' });
-
-      const [session] = await db
-        .select()
-        .from(schema.sessions)
-        .where(eq(schema.sessions.id, 'rb-out'));
-      expect(session.status).toBe('output');
-
-      // Everything preserved
-      const taxRows = await db
-        .select()
-        .from(schema.taxonomyTrees)
-        .where(eq(schema.taxonomyTrees.sessionId, 'rb-out'));
-      expect(taxRows).toHaveLength(1);
-
-      const rubRows = await db
-        .select()
-        .from(schema.rubrics)
-        .where(eq(schema.rubrics.sessionId, 'rb-out'));
-      expect(rubRows).toHaveLength(1);
-
-      const ideaRows = await db
-        .select()
-        .from(schema.ideas)
-        .where(eq(schema.ideas.sessionId, 'rb-out'));
-      expect(ideaRows).toHaveLength(1);
-
-      // Output preserved
-      const outRows = await db
-        .select()
-        .from(schema.outputPackages)
-        .where(eq(schema.outputPackages.sessionId, 'rb-out'));
-      expect(outRows).toHaveLength(1);
-    });
-
-    it('rolling back to methods preserves taxonomy and methods, clears rubric/ideas/output', async () => {
+    it('rolling back to methods preserves taxonomy and methods, clears rubric/ideas/packages', async () => {
       await seedFullSession(db, 'rb-meth');
 
       await caller.session.rollback({ id: 'rb-meth', toStage: 'methods' });
@@ -891,12 +919,19 @@ describe('session router', () => {
         .where(eq(schema.ideas.sessionId, 'rb-meth'));
       expect(ideaRows).toHaveLength(0);
 
-      // Output cleared
-      const outRows = await db
+      // QA sheets cleared
+      const qaRows = await db
         .select()
-        .from(schema.outputPackages)
-        .where(eq(schema.outputPackages.sessionId, 'rb-meth'));
-      expect(outRows).toHaveLength(0);
+        .from(schema.qaSheets)
+        .where(eq(schema.qaSheets.sessionId, 'rb-meth'));
+      expect(qaRows).toHaveLength(0);
+
+      // Idea packages cleared
+      const pkgRows = await db
+        .select()
+        .from(schema.ideaPackages)
+        .where(eq(schema.ideaPackages.sessionId, 'rb-meth'));
+      expect(pkgRows).toHaveLength(0);
     });
   });
 

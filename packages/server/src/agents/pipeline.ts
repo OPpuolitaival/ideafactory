@@ -6,7 +6,6 @@ import { loadConfig, getAllMethods } from '../config/index.js';
 import { runTaxonomy } from './navigator.js';
 import { runMethodSelection, runRubricDesign } from './strategist.js';
 import { runFactory } from './factory.js';
-import { runOutput } from './analyst.js';
 import { pipelineRegistry } from './registry.js';
 
 export async function runPipeline(sessionId: string, stage: Stage): Promise<void> {
@@ -147,58 +146,8 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
           signal: controller.signal,
         });
 
-        sseManager.emit(sessionId, {
-          type: 'status:stage_complete',
-          data: { stage: 'factory', next: 'output' },
-        });
-        break;
-      }
-
-      case 'output': {
-        const [session] = await db
-          .select()
-          .from(schema.sessions)
-          .where(eq(schema.sessions.id, sessionId));
-        if (!session) throw new Error('Session not found');
-
-        const sessionConfig = session.config ? JSON.parse(session.config) : {};
-
-        const [methodSelection] = await db
-          .select()
-          .from(schema.methodSelections)
-          .where(eq(schema.methodSelections.sessionId, sessionId));
-
-        const selectedMethodIds: number[] = methodSelection
-          ? JSON.parse(methodSelection.selected)
-          : [];
-        const allMethods = getAllMethods();
-        const selectedMethods = allMethods.filter((m) => selectedMethodIds.includes(m.id));
-
-        const ideaRows = await db
-          .select()
-          .from(schema.ideas)
-          .where(eq(schema.ideas.sessionId, sessionId));
-
-        await runOutput({
-          sessionId,
-          domain: session.domain,
-          coordinate: session.coordinate ?? '',
-          methods: selectedMethods,
-          ideas: ideaRows,
-          model: sessionConfig.models?.analyst ?? config.models.analyst,
-          signal: controller.signal,
-        });
-
-        // Mark session completed
-        await db
-          .update(schema.sessions)
-          .set({ status: 'completed', updatedAt: Date.now() })
-          .where(eq(schema.sessions.id, sessionId));
-
-        sseManager.emit(sessionId, {
-          type: 'status:stage_complete',
-          data: { stage: 'output', next: 'completed' },
-        });
+        // Do NOT emit stage_complete — factory stays in interactive mode.
+        // Session completion is handled by the completeSession tRPC mutation.
         break;
       }
     }

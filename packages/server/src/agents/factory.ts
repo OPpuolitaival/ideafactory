@@ -10,7 +10,6 @@ import {
   rawIdeaArrayJsonSchema,
   scoredIdeaArrayJsonSchema,
   evolvedConceptArrayJsonSchema,
-  qaResultArrayJsonSchema,
 } from './schemas.js';
 import { eq } from 'drizzle-orm';
 import { sseManager } from '../sse/index.js';
@@ -31,7 +30,6 @@ const MAX_PARALLEL_SCORERS = 10;
 const CONVERGENCE_TARGET_SURVIVORS = 10;
 const EVOLUTION_WORKERS = 3;
 const PAIRS_PER_WORKER = 5;
-const RESCORE_TARGET_SURVIVORS = 6;
 
 interface RunFactoryOptions {
   sessionId: string;
@@ -130,24 +128,10 @@ export async function runFactory(options: RunFactoryOptions): Promise<void> {
     data: { evolved },
   });
 
-  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-
-  // Phase D: QA
+  // Emit interactive event — combined pool ready for user selection
   sseManager.emit(sessionId, {
-    type: 'agent:thought',
-    data: { agent: 'Analyst', text: 'Running QA critique on evolved concepts...', model: analystModel },
-  });
-  sseManager.emit(sessionId, {
-    type: 'factory:progress',
-    data: { phase: 'qa', detail: `QA critique on ${evolved.length} concepts...` },
-  });
-
-  await runQA({
-    sessionId,
-    concepts: evolved,
-    rubric,
-    model: analystModel,
-    signal,
+    type: 'factory:interactive',
+    data: { combinedPool: evolved },
   });
 }
 
@@ -700,10 +684,9 @@ Return ONLY the JSON array, no other text.`,
 
   const gatePassedEvolved = rescored.filter((s) => !s.eliminated);
   gatePassedEvolved.sort((a, b) => b.totalScore - a.totalScore);
-  const finalSurvivors = gatePassedEvolved.slice(0, RESCORE_TARGET_SURVIVORS);
 
-  // Persist evolved ideas
-  for (const idea of finalSurvivors) {
+  // Persist evolved ideas (no top-N cutoff — all gate-passing evolved concepts join the pool)
+  for (const idea of gatePassedEvolved) {
     await db.insert(schema.ideas).values({
       id: nanoid(12),
       sessionId,
@@ -718,11 +701,11 @@ Return ONLY the JSON array, no other text.`,
 
   sseManager.emit(sessionId, {
     type: 'agent:thought',
-    data: { agent: 'Analyst', text: `Evolution complete. ${finalSurvivors.length} concepts after cross-pollination and re-scoring.`, model },
+    data: { agent: 'Analyst', text: `Evolution complete. ${gatePassedEvolved.length} new concepts + ${survivors.length} survivors = ${survivors.length + gatePassedEvolved.length} total pool.`, model },
   });
 
   // If re-scoring eliminated everything, fall back to original survivors
-  if (finalSurvivors.length === 0) {
+  if (gatePassedEvolved.length === 0) {
     sseManager.emit(sessionId, {
       type: 'agent:thought',
       data: { agent: 'Analyst', text: 'All evolved concepts eliminated. Falling back to original survivors.', model },
@@ -730,86 +713,7 @@ Return ONLY the JSON array, no other text.`,
     return survivors;
   }
 
-  return finalSurvivors;
+  // Merge: survivors keep phase 'converge' (already persisted), evolved get phase 'evolve'
+  return [...survivors, ...gatePassedEvolved];
 }
 
-// ---- Phase D: QA ----
-
-interface QAOptions {
-  sessionId: string;
-  concepts: ScoredIdea[];
-  rubric: Rubric;
-  model: string;
-  signal?: AbortSignal;
-}
-
-async function runQA(options: QAOptions): Promise<void> {
-  const { sessionId, concepts, rubric, model, signal } = options;
-  const db = getDb();
-
-  const conceptText = concepts
-    .map((c) => `[${c.id}] "${c.name}" (score: ${c.totalScore}): ${c.description}`)
-    .join('\n\n');
-
-  const { QAResultSchema } = await import('@ideafactory/shared');
-
-  const qaResults = await callLLMWithRetry(
-    {
-      model,
-      system: `${CRITIC_SKILL}\n\nYou are in QA MODE. Reality-check evolved concepts.`,
-      prompt: `Perform QA critique on these ${concepts.length} evolved concepts. Return a JSON array.
-
-${conceptText}
-
-Rubric: ${JSON.stringify(rubric, null, 2)}
-
-For each concept, provide a thorough reality-check. NOT all concepts should get "strong" — be genuinely critical.
-
-Return a JSON array where each element has these exact fields:
-- "conceptId": string matching one of the concept IDs above (e.g. "${concepts[0]?.id ?? 'scored-1'}")
-- "feasibilityScore": integer 1-5
-- "risks": array of 3-6 objects, each with:
-  - "category": string (e.g. "Technical", "Market", "Legal", "Financial")
-  - "description": string
-  - "severity": "low" | "medium" | "high"
-  - "mitigation": string (optional)
-- "verdict": exactly one of "strong", "conditional", or "weak"
-- "summary": 1-2 sentence assessment
-
-Return ONLY the JSON array, no other text.`,
-      outputSchema: qaResultArrayJsonSchema,
-      sessionId,
-      agentName: 'Analyst',
-      timeoutMs: 300_000,
-      signal,
-    },
-    (jsonStr) => {
-      const parsed = JSON.parse(jsonStr);
-      return z.array(QAResultSchema).parse(parsed);
-    },
-  );
-
-  // Persist QA results as idea phase data
-  for (const qa of qaResults) {
-    await db.insert(schema.ideas).values({
-      id: nanoid(12),
-      sessionId,
-      name: qa.conceptId,
-      description: qa.summary,
-      phase: 'qa',
-      score: qa.feasibilityScore,
-      eliminated: qa.verdict === 'weak' ? 1 : 0,
-      data: JSON.stringify(qa),
-    });
-  }
-
-  sseManager.emit(sessionId, {
-    type: 'data:qa_result',
-    data: { reviewed: qaResults },
-  });
-
-  sseManager.emit(sessionId, {
-    type: 'agent:thought',
-    data: { agent: 'Analyst', text: 'QA critique complete.', model },
-  });
-}

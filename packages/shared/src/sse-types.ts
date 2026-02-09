@@ -3,7 +3,7 @@ import type { MethodRecommendation } from './schemas/methods.js';
 import type { Rubric } from './schemas/rubric.js';
 import type { RawIdea, ScoredIdea } from './schemas/ideas.js';
 import type { QAResult } from './schemas/qa.js';
-import type { OutputPackage } from './schemas/output.js';
+import type { IdeaPackage } from './schemas/packaging.js';
 
 export type SSEEvent =
   | { type: 'agent:thought'; data: { agent: string; text: string; model?: string } }
@@ -20,12 +20,13 @@ export type SSEEvent =
       data: { survivors: ScoredIdea[]; eliminated: ScoredIdea[] };
     }
   | { type: 'data:evolution_result'; data: { evolved: ScoredIdea[] } }
-  | { type: 'data:qa_result'; data: { reviewed: QAResult[] } }
-  | { type: 'data:output_package'; data: OutputPackage }
+  | { type: 'data:qa_sheet'; data: QAResult }
+  | { type: 'data:idea_package'; data: IdeaPackage }
+  | { type: 'factory:interactive'; data: { combinedPool: ScoredIdea[] } }
   | {
       type: 'factory:progress';
       data: {
-        phase: 'diverge' | 'converge' | 'evolve' | 'qa' | 'rescore';
+        phase: 'diverge' | 'converge' | 'evolve' | 'rescore' | 'qa' | 'packaging';
         detail: string;
         workersTotal?: number;
         workersDone?: number;

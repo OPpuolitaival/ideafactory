@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { STAGE_ORDER, STAGES } from '@ideafactory/shared';
-import type { Stage, SessionModels, TaxonomyNode, Rubric, RawIdea, ScoredIdea, QAResult, OutputPackage, SSEEvent } from '@ideafactory/shared';
+import type { Stage, SessionModels, TaxonomyNode, Rubric, RawIdea, ScoredIdea, QAResult, IdeaPackage, SSEEvent } from '@ideafactory/shared';
 
 export interface ThoughtEntry {
   id: string;
@@ -21,7 +21,8 @@ export interface SessionData {
   methods: { recommended: number[]; reasoning: Record<string, string>; selected: number[] } | null;
   rubric: Rubric | null;
   ideas: { id: string; phase: string; workerId: string | null; data: any }[];
-  output: { package: OutputPackage; artifacts: any } | null;
+  qaSheets: { ideaId: string; feasibilityScore: number; verdict: string; summary: string; risks: any[] }[];
+  ideaPackages: { ideaId: string; ideaName: string; htmlContent: string; deepResearchPrompt: string }[];
   eventLog: { type: string; data: any }[];
 }
 
@@ -48,7 +49,7 @@ interface SessionState {
   rubric: Rubric | null;
 
   // Factory
-  factoryPhase: 'idle' | 'diverge' | 'converge' | 'evolve' | 'qa' | 'complete';
+  factoryPhase: 'idle' | 'diverge' | 'converge' | 'evolve' | 'interactive' | 'complete';
   factoryProgress: {
     detail: string;
     workersTotal?: number;
@@ -59,10 +60,11 @@ interface SessionState {
   workerIdeas: Map<string, RawIdea[]>;
   scoredIdeas: ScoredIdea[];
   evolvedIdeas: ScoredIdea[];
-  qaResults: QAResult[];
-
-  // Output
-  outputPackage: OutputPackage | null;
+  combinedPool: ScoredIdea[];
+  qaSheets: QAResult[];
+  ideaPackages: IdeaPackage[];
+  qaInProgress: boolean;
+  packagingInProgress: boolean;
 
   // Thought feed
   thoughts: ThoughtEntry[];
@@ -88,8 +90,9 @@ interface SessionState {
   addWorkerIdea: (workerId: string, idea: RawIdea) => void;
   setScoredIdeas: (ideas: ScoredIdea[]) => void;
   setEvolvedIdeas: (ideas: ScoredIdea[]) => void;
-  setQAResults: (results: QAResult[]) => void;
-  setOutputPackage: (pkg: OutputPackage) => void;
+  setCombinedPool: (ideas: ScoredIdea[]) => void;
+  addQASheet: (sheet: QAResult) => void;
+  addIdeaPackage: (pkg: IdeaPackage) => void;
   addThought: (agent: string, text: string, model?: string) => void;
   addStageCheckpoint: (stage: Stage) => void;
   clearDownstreamState: (targetStage: Stage) => void;
@@ -118,8 +121,11 @@ const initialState = {
   workerIdeas: new Map<string, RawIdea[]>(),
   scoredIdeas: [] as ScoredIdea[],
   evolvedIdeas: [] as ScoredIdea[],
-  qaResults: [] as QAResult[],
-  outputPackage: null,
+  combinedPool: [] as ScoredIdea[],
+  qaSheets: [] as QAResult[],
+  ideaPackages: [] as IdeaPackage[],
+  qaInProgress: false,
+  packagingInProgress: false,
   thoughts: [] as ThoughtEntry[],
   stageModels: {} as Record<string, string>,
   sessionModels: null as SessionModels | null,
@@ -167,8 +173,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   setScoredIdeas: (scoredIdeas) => set({ scoredIdeas }),
   setEvolvedIdeas: (evolvedIdeas) => set({ evolvedIdeas }),
-  setQAResults: (qaResults) => set({ qaResults }),
-  setOutputPackage: (outputPackage) => set({ outputPackage }),
+  setCombinedPool: (combinedPool) => set({ combinedPool }),
+
+  addQASheet: (sheet) => {
+    set({ qaSheets: [...get().qaSheets, sheet] });
+  },
+
+  addIdeaPackage: (pkg) => {
+    set({ ideaPackages: [...get().ideaPackages, pkg] });
+  },
 
   addThought: (agent, text, model?) => {
     const entry: ThoughtEntry = {
@@ -224,10 +237,18 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       updates.workerIdeas = new Map();
       updates.scoredIdeas = [];
       updates.evolvedIdeas = [];
-      updates.qaResults = [];
+      updates.combinedPool = [];
+      updates.qaSheets = [];
+      updates.ideaPackages = [];
+      updates.qaInProgress = false;
+      updates.packagingInProgress = false;
     }
-    if (stageIdx < STAGE_ORDER.indexOf('output')) {
-      updates.outputPackage = null;
+    // Rolling back TO factory clears QA/packaging (interactive sub-operations)
+    if (stageIdx <= STAGE_ORDER.indexOf('factory')) {
+      updates.qaSheets = [];
+      updates.ideaPackages = [];
+      updates.qaInProgress = false;
+      updates.packagingInProgress = false;
     }
 
     // Clear downstream stageModels
@@ -268,10 +289,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       updates.rubric = data.rubric;
     }
 
-    if (data.output?.package) {
-      updates.outputPackage = data.output.package;
-    }
-
     set(updates);
 
     // Hydrate factory ideas by phase (needs sequential addWorkerIdea calls)
@@ -280,7 +297,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const divergeIdeas = data.ideas.filter((i) => i.phase === 'diverge');
       const convergeIdeas = data.ideas.filter((i) => i.phase === 'converge');
       const evolveIdeas = data.ideas.filter((i) => i.phase === 'evolve');
-      const qaIdeas = data.ideas.filter((i) => i.phase === 'qa');
 
       for (const idea of divergeIdeas) {
         if (idea.workerId && idea.data) {
@@ -296,23 +312,50 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         store.setEvolvedIdeas(evolveIdeas.filter((i) => i.data).map((i) => i.data));
       }
 
-      if (qaIdeas.length > 0) {
-        store.setQAResults(qaIdeas.filter((i) => i.data).map((i) => i.data));
+      // Reconstruct combined pool from non-eliminated converge + evolve ideas
+      const poolIdeas = [...convergeIdeas, ...evolveIdeas]
+        .filter((i) => i.data && !i.data.eliminated)
+        .map((i) => i.data);
+      if (poolIdeas.length > 0) {
+        store.setCombinedPool(poolIdeas);
       }
 
-      if (qaIdeas.length > 0) {
-        store.setFactoryPhase('qa');
-      } else if (evolveIdeas.length > 0) {
+      if (evolveIdeas.length > 0 || convergeIdeas.length > 0) {
         store.setFactoryPhase('evolve');
-      } else if (convergeIdeas.length > 0) {
-        store.setFactoryPhase('converge');
       } else if (divergeIdeas.length > 0) {
         store.setFactoryPhase('diverge');
       }
+    }
 
-      if (data.status === 'output' || data.status === 'completed') {
-        store.setFactoryPhase('complete');
-      }
+    // Hydrate QA sheets
+    if (data.qaSheets && data.qaSheets.length > 0) {
+      const qaResults: QAResult[] = data.qaSheets.map((s) => ({
+        conceptId: s.ideaId,
+        feasibilityScore: s.feasibilityScore,
+        verdict: s.verdict as 'strong' | 'conditional' | 'weak',
+        summary: s.summary,
+        risks: s.risks,
+      }));
+      set({ qaSheets: qaResults, factoryPhase: 'interactive' });
+    } else if (data.ideas?.some((i) => i.phase === 'evolve' || i.phase === 'converge')) {
+      // If we have evolved/converged ideas but no QA, we're in interactive mode
+      set({ factoryPhase: 'interactive' });
+    }
+
+    // Hydrate idea packages
+    if (data.ideaPackages && data.ideaPackages.length > 0) {
+      set({
+        ideaPackages: data.ideaPackages.map((p) => ({
+          ideaId: p.ideaId,
+          ideaName: p.ideaName,
+          htmlContent: p.htmlContent,
+          deepResearchPrompt: p.deepResearchPrompt,
+        })),
+      });
+    }
+
+    if (data.status === 'completed') {
+      set({ factoryPhase: 'complete' });
     }
 
     // Populate sessionModels from config
@@ -380,14 +423,24 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       case 'data:evolution_result':
         set({ factoryPhase: 'evolve', factoryProgress: null, evolvedIdeas: event.data.evolved });
         break;
-      case 'data:qa_result':
-        set({ factoryPhase: 'qa', factoryProgress: null, qaResults: event.data.reviewed });
+      case 'factory:interactive':
+        set({
+          factoryPhase: 'interactive',
+          factoryProgress: null,
+          combinedPool: event.data.combinedPool,
+          factoryStartedAt: null,
+        });
+        break;
+      case 'data:qa_sheet':
+        store.addQASheet(event.data);
+        set({ qaInProgress: false });
+        break;
+      case 'data:idea_package':
+        store.addIdeaPackage(event.data);
+        set({ packagingInProgress: false });
         break;
       case 'factory:progress':
         set({ factoryProgress: event.data });
-        break;
-      case 'data:output_package':
-        set({ outputPackage: event.data });
         break;
       case 'status:stage_complete': {
         set({ factoryPhase: event.data.stage === 'factory' ? 'complete' : get().factoryPhase });
@@ -410,7 +463,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         store.addThought('system', `Starting ${event.data.stage} stage...`);
         break;
       case 'status:error':
-        set({ error: event.data.error, errorStage: event.data.stage, isLoading: false, factoryProgress: null, factoryStartedAt: null, factoryPhase: 'idle' });
+        set({ error: event.data.error, errorStage: event.data.stage, isLoading: false, factoryPhase: 'idle', factoryProgress: null, factoryStartedAt: null, qaInProgress: false, packagingInProgress: false });
         break;
     }
   },

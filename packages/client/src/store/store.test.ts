@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useSessionStore } from './index.js';
 import type { SSEEvent } from '@ideafactory/shared';
-import type { TaxonomyNode, Rubric, RawIdea, ScoredIdea, QAResult, OutputPackage } from '@ideafactory/shared';
+import type { TaxonomyNode, Rubric, RawIdea, ScoredIdea, QAResult, IdeaPackage } from '@ideafactory/shared';
 
 // ---------------------------------------------------------------------------
 // Shared test fixtures
@@ -86,30 +86,11 @@ const qaResult: QAResult = {
   summary: 'Solid concept.',
 };
 
-const outputPackage: OutputPackage = {
-  concepts: [
-    {
-      rank: 1,
-      name: 'Concept 1',
-      description: 'Top concept',
-      pros: ['fast'],
-      cons: ['expensive'],
-      openQuestions: ['scalability?'],
-      nextSteps: ['prototype'],
-      qaVerdict: 'strong',
-    },
-  ],
-  overallInsights: 'Good session',
-  suggestedNextSprint: ['Prototype top concept'],
-  sessionMetadata: {
-    domain: 'Robotics',
-    coordinate: 'Manipulation > Grippers',
-    methods: ['First Principles', 'TRIZ'],
-    methodCount: 3,
-    totalIdeasGenerated: 45,
-    totalIdeasSurvived: 5,
-    duration: 120000,
-  },
+const ideaPackage: IdeaPackage = {
+  ideaId: 's1',
+  ideaName: 'Widget',
+  htmlContent: '<html><body>Report</body></html>',
+  deepResearchPrompt: '## Research\nInvestigate feasibility...',
 };
 
 // ---------------------------------------------------------------------------
@@ -137,8 +118,11 @@ beforeEach(() => {
     workerIdeas: new Map(),
     scoredIdeas: [],
     evolvedIdeas: [],
-    qaResults: [],
-    outputPackage: null,
+    combinedPool: [],
+    qaSheets: [],
+    ideaPackages: [],
+    qaInProgress: false,
+    packagingInProgress: false,
     thoughts: [],
     stageModels: {},
     sessionModels: null,
@@ -316,20 +300,19 @@ describe('Factory', () => {
     expect(useSessionStore.getState().evolvedIdeas).toEqual([evolvedIdea]);
   });
 
-  it('setQAResults stores QA results', () => {
-    useSessionStore.getState().setQAResults([qaResult]);
-    expect(useSessionStore.getState().qaResults).toEqual([qaResult]);
+  it('setCombinedPool stores combined pool', () => {
+    useSessionStore.getState().setCombinedPool([scoredIdea, evolvedIdea]);
+    expect(useSessionStore.getState().combinedPool).toEqual([scoredIdea, evolvedIdea]);
   });
-});
 
-// =========================================================================
-// Output
-// =========================================================================
+  it('addQASheet appends to qaSheets', () => {
+    useSessionStore.getState().addQASheet(qaResult);
+    expect(useSessionStore.getState().qaSheets).toEqual([qaResult]);
+  });
 
-describe('Output', () => {
-  it('setOutputPackage stores package', () => {
-    useSessionStore.getState().setOutputPackage(outputPackage);
-    expect(useSessionStore.getState().outputPackage).toEqual(outputPackage);
+  it('addIdeaPackage appends to ideaPackages', () => {
+    useSessionStore.getState().addIdeaPackage(ideaPackage);
+    expect(useSessionStore.getState().ideaPackages).toEqual([ideaPackage]);
   });
 });
 
@@ -521,26 +504,37 @@ describe('handleSSEEvent', () => {
     expect(state.evolvedIdeas).toEqual([evolvedIdea]);
   });
 
-  it('data:qa_result sets factoryPhase to qa and stores QA results', () => {
+  it('factory:interactive sets factoryPhase to interactive and stores combinedPool', () => {
     const event: SSEEvent = {
-      type: 'data:qa_result',
-      data: { reviewed: [qaResult] },
+      type: 'factory:interactive',
+      data: { combinedPool: [scoredIdea, evolvedIdea] },
     };
     useSessionStore.getState().handleSSEEvent(event);
 
     const state = useSessionStore.getState();
-    expect(state.factoryPhase).toBe('qa');
-    expect(state.qaResults).toEqual([qaResult]);
+    expect(state.factoryPhase).toBe('interactive');
+    expect(state.combinedPool).toEqual([scoredIdea, evolvedIdea]);
   });
 
-  it('data:output_package stores output package', () => {
+  it('data:qa_sheet appends to qaSheets', () => {
     const event: SSEEvent = {
-      type: 'data:output_package',
-      data: outputPackage,
+      type: 'data:qa_sheet',
+      data: qaResult,
     };
     useSessionStore.getState().handleSSEEvent(event);
 
-    expect(useSessionStore.getState().outputPackage).toEqual(outputPackage);
+    const state = useSessionStore.getState();
+    expect(state.qaSheets).toEqual([qaResult]);
+  });
+
+  it('data:idea_package appends to ideaPackages', () => {
+    const event: SSEEvent = {
+      type: 'data:idea_package',
+      data: ideaPackage,
+    };
+    useSessionStore.getState().handleSSEEvent(event);
+
+    expect(useSessionStore.getState().ideaPackages).toEqual([ideaPackage]);
   });
 
   it('factory:progress sets factoryProgress', () => {
@@ -605,11 +599,11 @@ describe('handleSSEEvent', () => {
   });
 
   it('status:stage_complete with factory stage sets factoryPhase to complete and adds checkpoint', () => {
-    useSessionStore.setState({ factoryPhase: 'qa' });
+    useSessionStore.setState({ factoryPhase: 'interactive' });
 
     const event: SSEEvent = {
       type: 'status:stage_complete',
-      data: { stage: 'factory', next: 'output' },
+      data: { stage: 'factory', next: 'completed' },
     };
     useSessionStore.getState().handleSSEEvent(event);
 
@@ -730,8 +724,11 @@ describe('reset', () => {
       factoryPhase: 'converge',
       scoredIdeas: [scoredIdea],
       evolvedIdeas: [evolvedIdea],
-      qaResults: [qaResult],
-      outputPackage: outputPackage,
+      combinedPool: [scoredIdea],
+      qaSheets: [qaResult],
+      ideaPackages: [ideaPackage],
+      qaInProgress: true,
+      packagingInProgress: true,
     });
     useSessionStore.getState().addThought('test', 'Should be cleared');
 
@@ -757,8 +754,11 @@ describe('reset', () => {
     expect(state.workerIdeas.size).toBe(0);
     expect(state.scoredIdeas).toEqual([]);
     expect(state.evolvedIdeas).toEqual([]);
-    expect(state.qaResults).toEqual([]);
-    expect(state.outputPackage).toBeNull();
+    expect(state.combinedPool).toEqual([]);
+    expect(state.qaSheets).toEqual([]);
+    expect(state.ideaPackages).toEqual([]);
+    expect(state.qaInProgress).toBe(false);
+    expect(state.packagingInProgress).toBe(false);
     expect(state.thoughts).toEqual([]);
     expect(state.stageModels).toEqual({});
     expect(state.sessionModels).toBeNull();
@@ -792,8 +792,9 @@ describe('reset', () => {
     expect(typeof state.addWorkerIdea).toBe('function');
     expect(typeof state.setScoredIdeas).toBe('function');
     expect(typeof state.setEvolvedIdeas).toBe('function');
-    expect(typeof state.setQAResults).toBe('function');
-    expect(typeof state.setOutputPackage).toBe('function');
+    expect(typeof state.setCombinedPool).toBe('function');
+    expect(typeof state.addQASheet).toBe('function');
+    expect(typeof state.addIdeaPackage).toBe('function');
     expect(typeof state.addThought).toBe('function');
     expect(typeof state.addStageCheckpoint).toBe('function');
     expect(typeof state.clearDownstreamState).toBe('function');
@@ -856,7 +857,7 @@ describe('clearDownstreamState', () => {
     useSessionStore.setState({
       sessionId: 'sess-1',
       domain: 'Robotics',
-      stage: 'output',
+      stage: 'completed',
       isLoading: true,
       error: 'some error',
       taxonomy: taxonomyNode,
@@ -868,8 +869,9 @@ describe('clearDownstreamState', () => {
       factoryPhase: 'complete',
       scoredIdeas: [scoredIdea],
       evolvedIdeas: [evolvedIdea],
-      qaResults: [qaResult],
-      outputPackage: outputPackage,
+      combinedPool: [scoredIdea],
+      qaSheets: [qaResult],
+      ideaPackages: [ideaPackage],
       stageModels: {
         taxonomy: 'claude-haiku-4-5-20251001',
         methods: 'claude-sonnet-4-5-20250929',
@@ -894,8 +896,9 @@ describe('clearDownstreamState', () => {
     expect(s.workerIdeas.size).toBe(0);
     expect(s.scoredIdeas).toEqual([]);
     expect(s.evolvedIdeas).toEqual([]);
-    expect(s.qaResults).toEqual([]);
-    expect(s.outputPackage).toBeNull();
+    expect(s.combinedPool).toEqual([]);
+    expect(s.qaSheets).toEqual([]);
+    expect(s.ideaPackages).toEqual([]);
     expect(s.thoughts).toEqual([]);
     expect(s.isLoading).toBe(false);
     expect(s.error).toBeNull();
@@ -913,7 +916,7 @@ describe('clearDownstreamState', () => {
     expect(s.selectedMethods).toEqual([1, 3]); // preserved
     expect(s.rubric).toBeNull();
     expect(s.factoryPhase).toBe('idle');
-    expect(s.outputPackage).toBeNull();
+    expect(s.combinedPool).toEqual([]);
   });
 
   it('rolling back to rubric preserves taxonomy, methods, rubric, clears factory+', () => {
@@ -923,7 +926,7 @@ describe('clearDownstreamState', () => {
     expect(s.rubric).toEqual(rubric); // preserved
     expect(s.factoryPhase).toBe('idle');
     expect(s.scoredIdeas).toEqual([]);
-    expect(s.outputPackage).toBeNull();
+    expect(s.combinedPool).toEqual([]);
     // stageModels: taxonomy and methods preserved (indices 0 and 1 are < rubric index 2)
     expect(s.stageModels).toEqual({
       taxonomy: 'claude-haiku-4-5-20251001',
@@ -931,20 +934,14 @@ describe('clearDownstreamState', () => {
     });
   });
 
-  it('rolling back to factory preserves everything except output', () => {
+  it('rolling back to factory clears qaSheets and ideaPackages', () => {
     useSessionStore.getState().clearDownstreamState('factory');
     const s = useSessionStore.getState();
     expect(s.stage).toBe('factory');
     expect(s.rubric).toEqual(rubric);
     expect(s.scoredIdeas).toEqual([scoredIdea]); // preserved
-    expect(s.outputPackage).toBeNull();
-  });
-
-  it('rolling back to output preserves everything', () => {
-    useSessionStore.getState().clearDownstreamState('output');
-    const s = useSessionStore.getState();
-    expect(s.stage).toBe('output');
-    expect(s.outputPackage).toEqual(outputPackage); // preserved
+    expect(s.qaSheets).toEqual([]);
+    expect(s.ideaPackages).toEqual([]);
   });
 
   it('preserves sessionId and domain', () => {
@@ -980,7 +977,8 @@ describe('hydrateFromSession', () => {
       methods: null,
       rubric: null,
       ideas: [],
-      output: null,
+      qaSheets: [],
+      ideaPackages: [],
       eventLog: [],
     });
 
@@ -1000,7 +998,8 @@ describe('hydrateFromSession', () => {
       methods: null,
       rubric: null,
       ideas: [],
-      output: null,
+      qaSheets: [],
+      ideaPackages: [],
       eventLog: [],
     });
 
@@ -1023,7 +1022,8 @@ describe('hydrateFromSession', () => {
       },
       rubric: null,
       ideas: [],
-      output: null,
+      qaSheets: [],
+      ideaPackages: [],
       eventLog: [],
     });
 
@@ -1043,14 +1043,15 @@ describe('hydrateFromSession', () => {
       methods: null,
       rubric: rubric,
       ideas: [],
-      output: null,
+      qaSheets: [],
+      ideaPackages: [],
       eventLog: [],
     });
 
     expect(useSessionStore.getState().rubric).toEqual(rubric);
   });
 
-  it('hydrates output package', () => {
+  it('hydrates qaSheets and ideaPackages', () => {
     useSessionStore.getState().hydrateFromSession({
       id: 'hydrate-5',
       domain: 'Chairs',
@@ -1060,11 +1061,14 @@ describe('hydrateFromSession', () => {
       methods: null,
       rubric: null,
       ideas: [],
-      output: { package: outputPackage, artifacts: null },
+      qaSheets: [{ ideaId: 's1', feasibilityScore: 4, verdict: 'strong', summary: 'Good', risks: [] }],
+      ideaPackages: [{ ideaId: 's1', ideaName: 'Widget', htmlContent: '<html/>', deepResearchPrompt: 'prompt' }],
       eventLog: [],
     });
 
-    expect(useSessionStore.getState().outputPackage).toEqual(outputPackage);
+    const s = useSessionStore.getState();
+    expect(s.qaSheets).toHaveLength(1);
+    expect(s.ideaPackages).toHaveLength(1);
   });
 
   it('hydrates diverge ideas grouped by worker', () => {
@@ -1081,7 +1085,8 @@ describe('hydrateFromSession', () => {
         { id: 'i2', phase: 'diverge', workerId: 'w0', data: rawIdea2 },
         { id: 'i3', phase: 'diverge', workerId: 'w1', data: rawIdeaWorker1 },
       ],
-      output: null,
+      qaSheets: [],
+      ideaPackages: [],
       eventLog: [],
     });
 
@@ -1101,7 +1106,8 @@ describe('hydrateFromSession', () => {
       methods: null,
       rubric: null,
       ideas: [],
-      output: null,
+      qaSheets: [],
+      ideaPackages: [],
       eventLog: [
         { type: 'agent:thought', data: { agent: 'navigator', text: 'Exploring...' } },
         { type: 'agent:tool_use', data: { agent: 'strategist', tool: 'web_search' } },
@@ -1124,7 +1130,8 @@ describe('hydrateFromSession', () => {
       methods: null,
       rubric: null,
       ideas: [],
-      output: null,
+      qaSheets: [],
+      ideaPackages: [],
       eventLog: [
         { type: 'agent:thought', data: { agent: 'navigator', text: 'Working', model: 'claude-haiku-4-5-20251001' } },
         { type: 'status:stage_complete', data: { stage: 'taxonomy', next: 'methods' } },
@@ -1153,18 +1160,19 @@ describe('hydrateFromSession', () => {
       methods: null,
       rubric: null,
       ideas: [],
-      output: null,
+      qaSheets: [],
+      ideaPackages: [],
       eventLog: [],
     });
 
     expect(useSessionStore.getState().sessionModels).toEqual(models);
   });
 
-  it('sets factoryPhase to complete when status is output', () => {
+  it('sets factoryPhase to complete when status is completed', () => {
     useSessionStore.getState().hydrateFromSession({
       id: 'hydrate-8',
       domain: 'Chairs',
-      status: 'output',
+      status: 'completed',
       coordinate: null,
       taxonomy: null,
       methods: null,
@@ -1172,7 +1180,8 @@ describe('hydrateFromSession', () => {
       ideas: [
         { id: 'i1', phase: 'diverge', workerId: 'w0', data: rawIdea },
       ],
-      output: null,
+      qaSheets: [],
+      ideaPackages: [],
       eventLog: [],
     });
 

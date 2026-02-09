@@ -50,7 +50,7 @@ The client imports only the `AppRouter` **type** from server (devDependency) for
 The system follows a staged pipeline orchestrated in `packages/server/src/agents/pipeline.ts`:
 
 ```
-taxonomy → methods → rubric → factory → output → completed
+taxonomy → methods → rubric → factory → completed
 ```
 
 | Stage | Agent | Model (default) | Temp | Key File |
@@ -59,9 +59,13 @@ taxonomy → methods → rubric → factory → output → completed
 | Methods | Strategist | claude-sonnet-4 | 0.6 | `agents/strategist.ts` |
 | Rubric | Strategist | claude-sonnet-4 | 0.6 | `agents/strategist.ts` |
 | Factory | Workers + Analyst | claude-sonnet-4 | 0.5–0.9 | `agents/factory.ts` |
-| Output | Analyst | claude-sonnet-4 | 0.4 | `agents/analyst.ts` |
 
-The Factory stage has sequential sub-phases: **Diverge** (one worker per selected method, on-the-fly personas from method fields, temp=0.9) → **Converge** (batched scoring in groups of 5, gate filtering + top-N selection, temp=0.5) → **Evolve** (pair-based cross-pollination with re-scoring, temp=0.7) → **QA** (feasibility/risk, temp=0.5).
+The Factory stage has automated sub-phases: **Diverge** (one worker per selected method, on-the-fly personas from method fields, temp=0.9) → **Converge** (batched scoring in groups of 5, gate filtering + top-N selection, temp=0.5) → **Evolve** (pair-based cross-pollination with re-scoring, returns survivors + evolved combined, temp=0.7) → **Interactive** (user selects ideas for QA and packaging via tRPC mutations).
+
+Interactive operations (triggered by user, not automated):
+- **QA** (`session.runQA`): parallel per-idea feasibility/risk agents → `qa_sheets` table
+- **Packaging** (`session.packageIdeas`): per-idea HTML artifact + deep research prompt → `idea_packages` table
+- **Complete** (`session.completeSession`): marks session as completed
 
 ### Agent System
 
@@ -72,7 +76,7 @@ The Factory stage has sequential sub-phases: **Diverge** (one worker per selecte
 ### Data Layer
 
 - **SQLite** via better-sqlite3 + drizzle-orm, stored at `~/.ideafactory/data.db`
-- 6 tables: `sessions`, `taxonomy_trees`, `method_selections`, `rubrics`, `ideas`, `output_packages`
+- 8 tables: `sessions`, `taxonomy_trees`, `method_selections`, `rubrics`, `ideas`, `qa_sheets`, `idea_packages`, `event_log`
 - Schema defined in `packages/server/src/db/schema.ts`, inline migrations (CREATE TABLE IF NOT EXISTS)
 
 ### Client Architecture

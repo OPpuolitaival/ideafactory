@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useSessionStore } from '../../store/index.js';
 import { trpc } from '../../trpc/index.js';
+import type { RawIdea, ScoredIdea, QAResult, IdeaPackage } from '@ideafactory/shared';
 
-const PHASE_LABELS = {
+const PHASE_LABELS: Record<string, string> = {
   idle: 'Waiting...',
   diverge: 'Diverge — Generating Ideas',
   converge: 'Converge — Filtering & Scoring',
   evolve: 'Evolve — Polishing Concepts',
-  qa: 'QA — Reality Check',
-  complete: 'Factory Complete',
+  interactive: 'Review — QA & Package',
+  complete: 'Session Complete',
 };
 
-const PHASES = ['diverge', 'converge', 'evolve', 'qa'] as const;
+const PHASES = ['diverge', 'converge', 'evolve', 'interactive'] as const;
 
 function formatElapsed(ms: number): string {
   const totalSecs = Math.floor(ms / 1000);
@@ -44,29 +45,32 @@ export function FactoryStage() {
     workerIdeas,
     scoredIdeas,
     evolvedIdeas,
-    qaResults,
+    combinedPool,
+    qaSheets,
+    ideaPackages,
+    qaInProgress,
+    packagingInProgress,
     sessionId,
-    setStage,
-    setLoading,
+    stage,
   } = useSessionStore();
-  const elapsed = useElapsedTimer(factoryPhase !== 'complete' && factoryPhase !== 'idle' ? factoryStartedAt : null);
 
-  const advanceMutation = trpc.session.advance.useMutation();
+  const isAutomating =
+    factoryPhase !== 'idle' &&
+    factoryPhase !== 'interactive' &&
+    factoryPhase !== 'complete';
+  const elapsed = useElapsedTimer(isAutomating ? factoryStartedAt : null);
 
-  const handleAdvance = async () => {
-    if (!sessionId) return;
-    setLoading(true);
-    await advanceMutation.mutateAsync({ sessionId, stage: 'output' });
-    setStage('output');
-  };
-
-  const currentPhaseIdx = PHASES.indexOf(factoryPhase as any);
+  const currentPhaseIdx = PHASES.indexOf(factoryPhase as (typeof PHASES)[number]);
 
   return (
     <div className="max-w-6xl mx-auto">
       <h2 className="text-2xl font-bold mb-2">
         Stage 4: Factory
-        {elapsed && <span className="text-base font-normal text-gray-500 ml-3">({elapsed} elapsed)</span>}
+        {elapsed && (
+          <span className="text-base font-normal text-gray-500 ml-3">
+            ({elapsed} elapsed)
+          </span>
+        )}
       </h2>
       <p className="text-gray-400 mb-1">{PHASE_LABELS[factoryPhase]}</p>
       {factoryProgress && (
@@ -82,7 +86,9 @@ export function FactoryStage() {
           return (
             <div key={phase} className="flex items-center">
               {i > 0 && (
-                <div className={`w-12 h-px mx-2 ${isComplete ? 'bg-accent' : 'bg-bg-3'}`} />
+                <div
+                  className={`w-12 h-px mx-2 ${isComplete ? 'bg-accent' : 'bg-bg-3'}`}
+                />
               )}
               <div
                 className={`px-4 py-2 rounded-lg text-sm font-medium ${
@@ -93,7 +99,7 @@ export function FactoryStage() {
                       : 'bg-bg-2 text-gray-500'
                 }`}
               >
-                {isComplete && !isActive && '✓ '}
+                {isComplete && !isActive && '\u2713 '}
                 {phase.charAt(0).toUpperCase() + phase.slice(1)}
               </div>
             </div>
@@ -112,29 +118,25 @@ export function FactoryStage() {
       {/* Evolve View */}
       {factoryPhase === 'evolve' && <EvolutionView ideas={evolvedIdeas} />}
 
-      {/* QA View */}
-      {(factoryPhase === 'qa' || factoryPhase === 'complete') && <QAView results={qaResults} />}
-
-      {factoryPhase === 'complete' && (
-        <div className="mt-8 flex justify-end">
-          <button
-            onClick={handleAdvance}
-            disabled={advanceMutation.isPending}
-            className="btn-primary"
-          >
-            {advanceMutation.isPending ? 'Packaging...' : 'Next: Package Output'}
-          </button>
-        </div>
+      {/* Interactive View */}
+      {(factoryPhase === 'interactive' || factoryPhase === 'complete') && (
+        <InteractiveView
+          sessionId={sessionId}
+          combinedPool={combinedPool}
+          qaSheets={qaSheets}
+          ideaPackages={ideaPackages}
+          qaInProgress={qaInProgress}
+          packagingInProgress={packagingInProgress}
+          isCompleted={stage === 'completed' || factoryPhase === 'complete'}
+        />
       )}
     </div>
   );
 }
 
-function DivergenceView({
-  workerIdeas,
-}: {
-  workerIdeas: Map<string, import('@ideafactory/shared').RawIdea[]>;
-}) {
+// ---- Sub-components ----
+
+function DivergenceView({ workerIdeas }: { workerIdeas: Map<string, RawIdea[]> }) {
   const entries = Array.from(workerIdeas.entries());
 
   if (entries.length === 0) {
@@ -146,7 +148,10 @@ function DivergenceView({
   }
 
   return (
-    <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${entries.length}, 1fr)` }}>
+    <div
+      className="grid gap-4"
+      style={{ gridTemplateColumns: `repeat(${entries.length}, 1fr)` }}
+    >
       {entries.map(([workerId, ideas]) => (
         <div key={workerId}>
           <h4 className="font-medium text-sm mb-3 text-accent-light">
@@ -171,7 +176,9 @@ function DivergenceView({
                   </span>
                 </div>
                 <p className="text-gray-400 mt-1 text-xs">{idea.description}</p>
-                <span className="text-xs text-gray-500 mt-1 inline-block">{idea.method}</span>
+                <span className="text-xs text-gray-500 mt-1 inline-block">
+                  {idea.method}
+                </span>
               </div>
             ))}
           </div>
@@ -181,7 +188,7 @@ function DivergenceView({
   );
 }
 
-function ConvergenceView({ ideas }: { ideas: import('@ideafactory/shared').ScoredIdea[] }) {
+function ConvergenceView({ ideas }: { ideas: ScoredIdea[] }) {
   const sorted = [...ideas].sort((a, b) => {
     if (a.eliminated && !b.eliminated) return 1;
     if (!a.eliminated && b.eliminated) return -1;
@@ -191,10 +198,7 @@ function ConvergenceView({ ideas }: { ideas: import('@ideafactory/shared').Score
   return (
     <div className="space-y-3">
       {sorted.map((idea) => (
-        <div
-          key={idea.id}
-          className={`card ${idea.eliminated ? 'opacity-40' : ''}`}
-        >
+        <div key={idea.id} className={`card ${idea.eliminated ? 'opacity-40' : ''}`}>
           <div className="flex items-start justify-between">
             <div>
               <h4 className={`font-medium ${idea.eliminated ? 'line-through' : ''}`}>
@@ -206,7 +210,9 @@ function ConvergenceView({ ideas }: { ideas: import('@ideafactory/shared').Score
               {idea.eliminated ? (
                 <span className="badge bg-danger/20 text-danger">Eliminated</span>
               ) : (
-                <span className="text-lg font-bold text-accent">{idea.totalScore.toFixed(1)}</span>
+                <span className="text-lg font-bold text-accent">
+                  {idea.totalScore.toFixed(1)}
+                </span>
               )}
             </div>
           </div>
@@ -219,7 +225,7 @@ function ConvergenceView({ ideas }: { ideas: import('@ideafactory/shared').Score
   );
 }
 
-function EvolutionView({ ideas }: { ideas: import('@ideafactory/shared').ScoredIdea[] }) {
+function EvolutionView({ ideas }: { ideas: ScoredIdea[] }) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-400">
@@ -229,7 +235,9 @@ function EvolutionView({ ideas }: { ideas: import('@ideafactory/shared').ScoredI
         <div key={idea.id} className="card border-accent/20">
           <div className="flex items-start justify-between">
             <h4 className="font-medium">{idea.name}</h4>
-            <span className="text-lg font-bold text-accent">{idea.totalScore.toFixed(1)}</span>
+            <span className="text-lg font-bold text-accent">
+              {idea.totalScore.toFixed(1)}
+            </span>
           </div>
           <p className="text-sm text-gray-400 mt-2">{idea.description}</p>
         </div>
@@ -238,55 +246,285 @@ function EvolutionView({ ideas }: { ideas: import('@ideafactory/shared').ScoredI
   );
 }
 
-function QAView({ results }: { results: import('@ideafactory/shared').QAResult[] }) {
+function InteractiveView({
+  sessionId,
+  combinedPool,
+  qaSheets,
+  ideaPackages,
+  qaInProgress,
+  packagingInProgress,
+  isCompleted,
+}: {
+  sessionId: string | null;
+  combinedPool: ScoredIdea[];
+  qaSheets: QAResult[];
+  ideaPackages: IdeaPackage[];
+  qaInProgress: boolean;
+  packagingInProgress: boolean;
+  isCompleted: boolean;
+}) {
+  const [selectedForQA, setSelectedForQA] = useState<Set<string>>(new Set());
+  const [selectedForPkg, setSelectedForPkg] = useState<Set<string>>(new Set());
+  const store = useSessionStore();
+
+  const runQAMutation = trpc.session.runQA.useMutation();
+  const packageMutation = trpc.session.packageIdeas.useMutation();
+  const completeMutation = trpc.session.completeSession.useMutation();
+
+  const qaSheetMap = new Map(qaSheets.map((s) => [s.conceptId, s]));
+  const pkgMap = new Map(ideaPackages.map((p) => [p.ideaId, p]));
+
+  const sorted = [...combinedPool].sort((a, b) => b.totalScore - a.totalScore);
+
+  const toggleQA = (id: string) => {
+    setSelectedForQA((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const togglePkg = (id: string) => {
+    setSelectedForPkg((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleRunQA = async () => {
+    if (!sessionId || selectedForQA.size === 0) return;
+    store.setError(null);
+    useSessionStore.setState({ qaInProgress: true });
+    await runQAMutation.mutateAsync({
+      sessionId,
+      ideaIds: Array.from(selectedForQA),
+    });
+    setSelectedForQA(new Set());
+  };
+
+  const handlePackage = async () => {
+    if (!sessionId || selectedForPkg.size === 0) return;
+    store.setError(null);
+    useSessionStore.setState({ packagingInProgress: true });
+    await packageMutation.mutateAsync({
+      sessionId,
+      ideaIds: Array.from(selectedForPkg),
+    });
+    setSelectedForPkg(new Set());
+  };
+
+  const handleComplete = async () => {
+    if (!sessionId) return;
+    await completeMutation.mutateAsync({ sessionId });
+    store.setStage('completed');
+  };
+
+  const downloadHTML = (pkg: IdeaPackage) => {
+    const blob = new Blob([pkg.htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${pkg.ideaName.replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '-')}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const copyPrompt = async (pkg: IdeaPackage) => {
+    await navigator.clipboard.writeText(pkg.deepResearchPrompt);
+  };
+
   return (
-    <div className="space-y-4">
-      {results.map((qa) => (
-        <div key={qa.conceptId} className="card">
-          <div className="flex items-start justify-between mb-3">
-            <h4 className="font-medium">{qa.conceptId}</h4>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-400">
-                Feasibility: {qa.feasibilityScore}/5
-              </span>
-              <span
-                className={`badge ${
-                  qa.verdict === 'strong'
-                    ? 'bg-success/20 text-success'
-                    : qa.verdict === 'conditional'
-                      ? 'bg-warning/20 text-warning'
-                      : 'bg-danger/20 text-danger'
-                }`}
-              >
-                {qa.verdict}
-              </span>
-            </div>
-          </div>
-          <p className="text-sm text-gray-400 mb-3">{qa.summary}</p>
-          <div className="space-y-1">
-            {qa.risks.map((risk, i) => (
-              <div key={i} className="flex items-start gap-2 text-xs">
-                <span
-                  className={`badge ${
-                    risk.severity === 'critical'
-                      ? 'bg-danger/20 text-danger'
-                      : risk.severity === 'high'
-                        ? 'bg-danger/10 text-danger/80'
-                        : risk.severity === 'medium'
-                          ? 'bg-warning/20 text-warning'
-                          : 'bg-gray-500/20 text-gray-400'
-                  }`}
-                >
-                  {risk.severity}
-                </span>
-                <span className="text-gray-400">
-                  <strong>{risk.category}:</strong> {risk.description}
-                </span>
+    <div className="space-y-8">
+      {/* QA Results */}
+      {qaSheets.length > 0 && (
+        <section>
+          <h3 className="text-lg font-semibold mb-4">QA Results</h3>
+          <div className="space-y-3">
+            {qaSheets.map((qa) => (
+              <div key={qa.conceptId} className="card">
+                <div className="flex items-start justify-between mb-3">
+                  <h4 className="font-medium">
+                    {combinedPool.find((i) => i.id === qa.conceptId)?.name ??
+                      qa.conceptId}
+                  </h4>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-400">
+                      Feasibility: {qa.feasibilityScore}/5
+                    </span>
+                    <span
+                      className={`badge ${
+                        qa.verdict === 'strong'
+                          ? 'bg-success/20 text-success'
+                          : qa.verdict === 'conditional'
+                            ? 'bg-warning/20 text-warning'
+                            : 'bg-danger/20 text-danger'
+                      }`}
+                    >
+                      {qa.verdict}
+                    </span>
+                  </div>
+                </div>
+                <p className="text-sm text-gray-400 mb-3">{qa.summary}</p>
+                <div className="space-y-1">
+                  {qa.risks.map((risk, i) => (
+                    <div key={i} className="flex items-start gap-2 text-xs">
+                      <span
+                        className={`badge ${
+                          risk.severity === 'critical'
+                            ? 'bg-danger/20 text-danger'
+                            : risk.severity === 'high'
+                              ? 'bg-danger/10 text-danger/80'
+                              : risk.severity === 'medium'
+                                ? 'bg-warning/20 text-warning'
+                                : 'bg-gray-500/20 text-gray-400'
+                        }`}
+                      >
+                        {risk.severity}
+                      </span>
+                      <span className="text-gray-400">
+                        <strong>{risk.category}:</strong> {risk.description}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
+        </section>
+      )}
+
+      {/* Packaged Ideas */}
+      {ideaPackages.length > 0 && (
+        <section>
+          <h3 className="text-lg font-semibold mb-4">Packaged Ideas</h3>
+          <div className="space-y-3">
+            {ideaPackages.map((pkg) => (
+              <div key={pkg.ideaId} className="card border-accent/20">
+                <div className="flex items-start justify-between">
+                  <h4 className="font-medium">{pkg.ideaName}</h4>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => downloadHTML(pkg)}
+                      className="btn-ghost text-xs"
+                    >
+                      Download HTML
+                    </button>
+                    <button
+                      onClick={() => copyPrompt(pkg)}
+                      className="btn-ghost text-xs"
+                    >
+                      Copy Prompt
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Combined Idea Pool */}
+      <section>
+        <h3 className="text-lg font-semibold mb-2">Idea Pool</h3>
+        <p className="text-sm text-gray-400 mb-4">
+          Select ideas to run QA or package. Ideas already QA'd or packaged are marked.
+        </p>
+
+        {!isCompleted && (
+          <div className="flex items-center gap-3 mb-4">
+            <button
+              onClick={handleRunQA}
+              disabled={
+                selectedForQA.size === 0 || qaInProgress || runQAMutation.isPending
+              }
+              className="btn-primary text-sm"
+            >
+              {qaInProgress ? 'Running QA...' : `Run QA on Selected (${selectedForQA.size})`}
+            </button>
+            <button
+              onClick={handlePackage}
+              disabled={
+                selectedForPkg.size === 0 ||
+                packagingInProgress ||
+                packageMutation.isPending
+              }
+              className="btn-secondary text-sm"
+            >
+              {packagingInProgress
+                ? 'Packaging...'
+                : `Package Selected (${selectedForPkg.size})`}
+            </button>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {sorted.map((idea) => {
+            const hasQA = qaSheetMap.has(idea.id);
+            const hasPkg = pkgMap.has(idea.id);
+            const qaChecked = selectedForQA.has(idea.id);
+            const pkgChecked = selectedForPkg.has(idea.id);
+
+            return (
+              <div key={idea.id} className="card flex items-center gap-4">
+                {!isCompleted && (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={qaChecked}
+                      onChange={() => toggleQA(idea.id)}
+                      className="accent-accent"
+                      title="Select for QA"
+                    />
+                    <input
+                      type="checkbox"
+                      checked={pkgChecked}
+                      onChange={() => togglePkg(idea.id)}
+                      className="accent-accent"
+                      title="Select for packaging"
+                      disabled={!hasQA}
+                    />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-medium truncate">{idea.name}</h4>
+                    {hasQA && (
+                      <span className="badge bg-success/20 text-success text-xs">
+                        QA'd
+                      </span>
+                    )}
+                    {hasPkg && (
+                      <span className="badge bg-accent/20 text-accent text-xs">
+                        Packaged
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-400 truncate">{idea.description}</p>
+                </div>
+                <span className="text-lg font-bold text-accent shrink-0">
+                  {idea.totalScore.toFixed(1)}
+                </span>
+              </div>
+            );
+          })}
         </div>
-      ))}
+      </section>
+
+      {/* Complete Session */}
+      {!isCompleted && (
+        <div className="flex justify-end pt-4 border-t border-bg-3">
+          <button
+            onClick={handleComplete}
+            disabled={completeMutation.isPending}
+            className="btn-primary"
+          >
+            {completeMutation.isPending ? 'Completing...' : 'Complete Session'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

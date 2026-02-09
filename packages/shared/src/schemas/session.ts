@@ -1,9 +1,9 @@
 import { z } from 'zod';
 
-export const StageSchema = z.enum(['taxonomy', 'methods', 'rubric', 'factory', 'output', 'completed']);
+export const StageSchema = z.enum(['taxonomy', 'methods', 'rubric', 'factory', 'completed']);
 export type Stage = z.infer<typeof StageSchema>;
 
-export const FactoryPhaseSchema = z.enum(['diverge', 'converge', 'evolve', 'qa']);
+export const FactoryPhaseSchema = z.enum(['diverge', 'converge', 'evolve', 'interactive']);
 export type FactoryPhase = z.infer<typeof FactoryPhaseSchema>;
 
 export const SessionModelsSchema = z.object({

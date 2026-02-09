@@ -7,8 +7,7 @@ import {
   ScoredIdeaSchema,
   EvolvedConceptSchema,
   QAResultSchema,
-  OutputPackageSchema,
-  VisualArtifactSchema,
+  IdeaPackageSchema,
 } from '@ideafactory/shared';
 
 function toJsonSchema(schema: z.ZodType): Record<string, unknown> {
@@ -23,6 +22,5 @@ export const rawIdeaArrayJsonSchema = toJsonSchema(
 );
 export const scoredIdeaArrayJsonSchema = toJsonSchema(z.array(ScoredIdeaSchema));
 export const evolvedConceptArrayJsonSchema = toJsonSchema(z.array(EvolvedConceptSchema));
-export const qaResultArrayJsonSchema = toJsonSchema(z.array(QAResultSchema));
-export const outputPackageJsonSchema = toJsonSchema(OutputPackageSchema);
-export const visualArtifactArrayJsonSchema = toJsonSchema(z.array(VisualArtifactSchema));
+export const qaResultJsonSchema = toJsonSchema(QAResultSchema);
+export const ideaPackageJsonSchema = toJsonSchema(IdeaPackageSchema);

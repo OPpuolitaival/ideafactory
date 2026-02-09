@@ -10,7 +10,6 @@ import { TaxonomyStage } from './stages/TaxonomyStage.js';
 import { MethodsStage } from './stages/MethodsStage.js';
 import { RubricStage } from './stages/RubricStage.js';
 import { FactoryStage } from './stages/FactoryStage.js';
-import { OutputStage } from './stages/OutputStage.js';
 import { SettingsDialog } from './SettingsDialog.js';
 import { RollbackModal } from './RollbackModal.js';
 import { ErrorBanner } from './ErrorBanner.js';
@@ -80,10 +79,8 @@ export function App() {
       case 'rubric':
         return <RubricStage />;
       case 'factory':
-        return <FactoryStage />;
-      case 'output':
       case 'completed':
-        return <OutputStage />;
+        return <FactoryStage />;
       default:
         return <TaxonomyStage />;
     }
