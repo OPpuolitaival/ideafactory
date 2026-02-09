@@ -1,7 +1,7 @@
 import { useSessionStore } from '../../store/index.js';
 import { trpc } from '../../trpc/index.js';
 
-export function MethodsStage() {
+export function MethodsStage({ readOnly }: { readOnly?: boolean } = {}) {
   const {
     selectedMethods,
     recommendedMethods,
@@ -63,10 +63,10 @@ export function MethodsStage() {
           return (
             <div
               key={method.id}
-              onClick={() => toggleMethod(method.id)}
-              className={`card-hover relative ${
+              onClick={readOnly ? undefined : () => toggleMethod(method.id)}
+              className={`${readOnly ? '' : 'card-hover'} relative ${
                 isSelected ? 'border-accent bg-accent/5' : ''
-              }`}
+              } ${readOnly ? 'card cursor-default' : ''}`}
             >
               {isRecommended && (
                 <span className="badge-recommended absolute top-3 right-3">Recommended</span>
@@ -102,15 +102,17 @@ export function MethodsStage() {
         })}
       </div>
 
-      <div className="flex justify-end">
-        <button
-          onClick={handleAdvance}
-          disabled={selectedMethods.length < 3 || selectedMethods.length > 5 || advanceMutation.isPending}
-          className="btn-primary"
-        >
-          {advanceMutation.isPending ? 'Advancing...' : 'Next: Rubric'}
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="flex justify-end">
+          <button
+            onClick={handleAdvance}
+            disabled={selectedMethods.length < 3 || selectedMethods.length > 5 || advanceMutation.isPending}
+            className="btn-primary"
+          >
+            {advanceMutation.isPending ? 'Advancing...' : 'Next: Rubric'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

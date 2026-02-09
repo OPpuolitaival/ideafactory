@@ -23,7 +23,7 @@ export interface SessionData {
   ideas: { id: string; phase: string; workerId: string | null; data: any }[];
   qaSheets: { ideaId: string; feasibilityScore: number; verdict: string; summary: string; risks: any[] }[];
   ideaPackages: { ideaId: string; ideaName: string; htmlContent: string; deepResearchPrompt: string }[];
-  eventLog: { type: string; data: any }[];
+  eventLog: { type: string; data: any; createdAt?: number }[];
 }
 
 interface SessionState {
@@ -93,7 +93,7 @@ interface SessionState {
   setCombinedPool: (ideas: ScoredIdea[]) => void;
   addQASheet: (sheet: QAResult) => void;
   addIdeaPackage: (pkg: IdeaPackage) => void;
-  addThought: (agent: string, text: string, model?: string) => void;
+  addThought: (agent: string, text: string, model?: string, timestamp?: number) => void;
   addStageCheckpoint: (stage: Stage) => void;
   clearDownstreamState: (targetStage: Stage) => void;
   hydrateFromSession: (data: SessionData) => void;
@@ -183,12 +183,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({ ideaPackages: [...get().ideaPackages, pkg] });
   },
 
-  addThought: (agent, text, model?) => {
+  addThought: (agent, text, model?, timestamp?) => {
     const entry: ThoughtEntry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       agent,
       text,
-      timestamp: Date.now(),
+      timestamp: timestamp ?? Date.now(),
       model,
     };
     set({ thoughts: [...get().thoughts, entry] });
@@ -370,13 +370,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
       for (const entry of data.eventLog) {
         if (entry.type === 'agent:thought') {
-          store.addThought(entry.data.agent, entry.data.text, entry.data.model);
+          store.addThought(entry.data.agent, entry.data.text, entry.data.model, entry.createdAt);
           if (entry.data.model) lastModel = entry.data.model;
         } else if (entry.type === 'agent:tool_use') {
-          store.addThought(entry.data.agent, `Using tool: ${entry.data.tool}`, entry.data.model);
+          store.addThought(entry.data.agent, `Using tool: ${entry.data.tool}`, entry.data.model, entry.createdAt);
           if (entry.data.model) lastModel = entry.data.model;
         } else if (entry.type === 'status:stage_start') {
-          store.addThought('system', `Starting ${entry.data.stage} stage...`);
+          store.addThought('system', `Starting ${entry.data.stage} stage...`, undefined, entry.createdAt);
         } else if (entry.type === 'status:stage_complete') {
           if (lastModel) {
             hydratedStageModels[entry.data.stage] = lastModel;

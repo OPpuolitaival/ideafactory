@@ -362,6 +362,22 @@ describe('Thought feed', () => {
     const thoughts = useSessionStore.getState().thoughts;
     expect(thoughts[0].model).toBeUndefined();
   });
+
+  it('addThought uses provided timestamp when given', () => {
+    const customTs = 1700000000000;
+    useSessionStore.getState().addThought('navigator', 'Historic thought', undefined, customTs);
+    const thoughts = useSessionStore.getState().thoughts;
+    expect(thoughts[0].timestamp).toBe(customTs);
+  });
+
+  it('addThought uses Date.now() when timestamp not provided', () => {
+    const before = Date.now();
+    useSessionStore.getState().addThought('navigator', 'Now thought');
+    const after = Date.now();
+    const thoughts = useSessionStore.getState().thoughts;
+    expect(thoughts[0].timestamp).toBeGreaterThanOrEqual(before);
+    expect(thoughts[0].timestamp).toBeLessThanOrEqual(after);
+  });
 });
 
 // =========================================================================
@@ -1118,6 +1134,35 @@ describe('hydrateFromSession', () => {
     expect(thoughts).toHaveLength(2);
     expect(thoughts[0].text).toBe('Exploring...');
     expect(thoughts[1].text).toBe('Using tool: web_search');
+  });
+
+  it('hydrates event log with createdAt timestamps preserved', () => {
+    const ts1 = 1700000001000;
+    const ts2 = 1700000002000;
+    const ts3 = 1700000003000;
+    useSessionStore.getState().hydrateFromSession({
+      id: 'hydrate-ts',
+      domain: 'Chairs',
+      status: 'taxonomy',
+      coordinate: null,
+      taxonomy: null,
+      methods: null,
+      rubric: null,
+      ideas: [],
+      qaSheets: [],
+      ideaPackages: [],
+      eventLog: [
+        { type: 'agent:thought', data: { agent: 'navigator', text: 'First' }, createdAt: ts1 },
+        { type: 'agent:tool_use', data: { agent: 'strategist', tool: 'search' }, createdAt: ts2 },
+        { type: 'status:stage_start', data: { stage: 'taxonomy' }, createdAt: ts3 },
+      ],
+    });
+
+    const thoughts = useSessionStore.getState().thoughts;
+    expect(thoughts).toHaveLength(3);
+    expect(thoughts[0].timestamp).toBe(ts1);
+    expect(thoughts[1].timestamp).toBe(ts2);
+    expect(thoughts[2].timestamp).toBe(ts3);
   });
 
   it('hydrates event log with model data and reconstructs stageModels', () => {

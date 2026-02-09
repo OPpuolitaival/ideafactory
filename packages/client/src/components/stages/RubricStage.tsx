@@ -2,7 +2,7 @@ import { useSessionStore } from '../../store/index.js';
 import { trpc } from '../../trpc/index.js';
 import type { Rubric } from '@ideafactory/shared';
 
-export function RubricStage() {
+export function RubricStage({ readOnly }: { readOnly?: boolean } = {}) {
   const { rubric, isLoading, sessionId, setRubric, setStage, setLoading } = useSessionStore();
   const advanceMutation = trpc.session.advance.useMutation();
   const updateRubricMutation = trpc.session.updateRubric.useMutation();
@@ -111,20 +111,28 @@ export function RubricStage() {
         <div className="space-y-2">
           {rubric.gates.map((gate, i) => (
             <div key={gate.id} className="flex items-center gap-2">
-              <input
-                type="text"
-                value={gate.text}
-                onChange={(e) => updateGateText(i, e.target.value)}
-                className="input flex-1"
-              />
-              <button onClick={() => deleteGate(i)} className="btn-ghost text-danger text-sm">
-                ✕
-              </button>
+              {readOnly ? (
+                <span className="flex-1 text-sm text-gray-300">{gate.text}</span>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    value={gate.text}
+                    onChange={(e) => updateGateText(i, e.target.value)}
+                    className="input flex-1"
+                  />
+                  <button onClick={() => deleteGate(i)} className="btn-ghost text-danger text-sm">
+                    ✕
+                  </button>
+                </>
+              )}
             </div>
           ))}
-          <button onClick={addGate} className="btn-ghost text-sm">
-            + Add Gate
-          </button>
+          {!readOnly && (
+            <button onClick={addGate} className="btn-ghost text-sm">
+              + Add Gate
+            </button>
+          )}
         </div>
       </section>
 
@@ -136,42 +144,56 @@ export function RubricStage() {
             <div key={criterion.id} className="card">
               <div className="flex items-start gap-3">
                 <div className="flex-1 space-y-2">
-                  <input
-                    type="text"
-                    value={criterion.text}
-                    onChange={(e) => updateCriterion(i, 'text', e.target.value)}
-                    className="input w-full font-medium"
-                    placeholder="Criterion name"
-                  />
-                  <input
-                    type="text"
-                    value={criterion.description}
-                    onChange={(e) => updateCriterion(i, 'description', e.target.value)}
-                    className="input w-full text-sm"
-                    placeholder="Description (1=bad, 5=good)"
-                  />
-                  <div className="flex items-center gap-3">
-                    <label className="text-xs text-gray-500">Weight:</label>
-                    <input
-                      type="range"
-                      min={1}
-                      max={5}
-                      value={criterion.weight}
-                      onChange={(e) => updateCriterion(i, 'weight', Number(e.target.value))}
-                      className="flex-1 accent-accent"
-                    />
-                    <span className="text-sm font-mono w-4 text-center">{criterion.weight}</span>
-                  </div>
+                  {readOnly ? (
+                    <>
+                      <span className="block font-medium text-sm">{criterion.text}</span>
+                      <span className="block text-sm text-gray-400">{criterion.description}</span>
+                      <span className="text-xs text-gray-500">Weight: {criterion.weight}</span>
+                    </>
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        value={criterion.text}
+                        onChange={(e) => updateCriterion(i, 'text', e.target.value)}
+                        className="input w-full font-medium"
+                        placeholder="Criterion name"
+                      />
+                      <input
+                        type="text"
+                        value={criterion.description}
+                        onChange={(e) => updateCriterion(i, 'description', e.target.value)}
+                        className="input w-full text-sm"
+                        placeholder="Description (1=bad, 5=good)"
+                      />
+                      <div className="flex items-center gap-3">
+                        <label className="text-xs text-gray-500">Weight:</label>
+                        <input
+                          type="range"
+                          min={1}
+                          max={5}
+                          value={criterion.weight}
+                          onChange={(e) => updateCriterion(i, 'weight', Number(e.target.value))}
+                          className="flex-1 accent-accent"
+                        />
+                        <span className="text-sm font-mono w-4 text-center">{criterion.weight}</span>
+                      </div>
+                    </>
+                  )}
                 </div>
-                <button onClick={() => deleteCriterion(i)} className="btn-ghost text-danger text-sm">
-                  ✕
-                </button>
+                {!readOnly && (
+                  <button onClick={() => deleteCriterion(i)} className="btn-ghost text-danger text-sm">
+                    ✕
+                  </button>
+                )}
               </div>
             </div>
           ))}
-          <button onClick={addCriterion} className="btn-ghost text-sm">
-            + Add Criterion
-          </button>
+          {!readOnly && (
+            <button onClick={addCriterion} className="btn-ghost text-sm">
+              + Add Criterion
+            </button>
+          )}
         </div>
       </section>
 
@@ -181,32 +203,42 @@ export function RubricStage() {
         <div className="space-y-2">
           {rubric.tests.map((test, i) => (
             <div key={test.id} className="flex items-center gap-2">
-              <input
-                type="text"
-                value={test.text}
-                onChange={(e) => updateTestText(i, e.target.value)}
-                className="input flex-1"
-              />
-              <button onClick={() => deleteTest(i)} className="btn-ghost text-danger text-sm">
-                ✕
-              </button>
+              {readOnly ? (
+                <span className="flex-1 text-sm text-gray-300">{test.text}</span>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    value={test.text}
+                    onChange={(e) => updateTestText(i, e.target.value)}
+                    className="input flex-1"
+                  />
+                  <button onClick={() => deleteTest(i)} className="btn-ghost text-danger text-sm">
+                    ✕
+                  </button>
+                </>
+              )}
             </div>
           ))}
-          <button onClick={addTest} className="btn-ghost text-sm">
-            + Add Test
-          </button>
+          {!readOnly && (
+            <button onClick={addTest} className="btn-ghost text-sm">
+              + Add Test
+            </button>
+          )}
         </div>
       </section>
 
-      <div className="flex justify-end">
-        <button
-          onClick={handleAdvance}
-          disabled={advanceMutation.isPending}
-          className="btn-primary"
-        >
-          {advanceMutation.isPending ? 'Starting Factory...' : 'Next: Run Factory'}
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="flex justify-end">
+          <button
+            onClick={handleAdvance}
+            disabled={advanceMutation.isPending}
+            className="btn-primary"
+          >
+            {advanceMutation.isPending ? 'Starting Factory...' : 'Next: Run Factory'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

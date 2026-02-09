@@ -9,9 +9,10 @@ function getModelColor(model?: string): string | undefined {
 
 interface StageBarProps {
   onStageClick?: (stage: Stage) => void;
+  viewingStage?: Stage | null;
 }
 
-export function StageBar({ onStageClick }: StageBarProps) {
+export function StageBar({ onStageClick, viewingStage }: StageBarProps) {
   const currentStage = useSessionStore((s) => s.stage);
   const isLoading = useSessionStore((s) => s.isLoading);
   const stageModels = useSessionStore((s) => s.stageModels);
@@ -26,6 +27,7 @@ export function StageBar({ onStageClick }: StageBarProps) {
           const isComplete = stageIdx < currentIdx;
           const isFuture = stageIdx > currentIdx;
           const isClickable = isComplete && !isLoading && onStageClick;
+          const isViewing = viewingStage === stage.id;
 
           return (
             <div key={stage.id} className="flex items-center">
@@ -39,13 +41,15 @@ export function StageBar({ onStageClick }: StageBarProps) {
               <div
                 onClick={isClickable ? () => onStageClick(stage.id as Stage) : undefined}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 ${
-                  isCurrent
-                    ? 'bg-accent/20 text-accent-light border border-accent/30'
-                    : isComplete
-                      ? 'text-accent'
-                      : isFuture
-                        ? 'text-gray-500'
-                        : ''
+                  isViewing
+                    ? 'border border-dashed border-accent/50 bg-accent/5 text-accent-light'
+                    : isCurrent
+                      ? 'bg-accent/20 text-accent-light border border-accent/30'
+                      : isComplete
+                        ? 'text-accent'
+                        : isFuture
+                          ? 'text-gray-500'
+                          : ''
                 } ${isClickable ? 'cursor-pointer hover:bg-accent/10' : ''}`}
               >
                 <span

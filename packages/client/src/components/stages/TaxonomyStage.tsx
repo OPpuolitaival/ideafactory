@@ -3,7 +3,7 @@ import { useSessionStore } from '../../store/index.js';
 import { trpc } from '../../trpc/index.js';
 import type { TaxonomyNode } from '@ideafactory/shared';
 
-export function TaxonomyStage() {
+export function TaxonomyStage({ readOnly }: { readOnly?: boolean } = {}) {
   const { taxonomy, selectedPath, isLoading, sessionId, setSelectedPath, setStage, setLoading } =
     useSessionStore();
   const advanceMutation = trpc.session.advance.useMutation();
@@ -66,21 +66,23 @@ export function TaxonomyStage() {
             node={taxonomy}
             path={[]}
             selectedPath={selectedPath}
-            onSelect={setSelectedPath}
+            onSelect={readOnly ? () => {} : setSelectedPath}
             filter={filter.toLowerCase()}
           />
         </div>
       )}
 
-      <div className="mt-6 flex justify-end">
-        <button
-          onClick={handleLock}
-          disabled={selectedPath.length === 0 || advanceMutation.isPending}
-          className="btn-primary"
-        >
-          {advanceMutation.isPending ? 'Advancing...' : 'Lock & Continue'}
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="mt-6 flex justify-end">
+          <button
+            onClick={handleLock}
+            disabled={selectedPath.length === 0 || advanceMutation.isPending}
+            className="btn-primary"
+          >
+            {advanceMutation.isPending ? 'Advancing...' : 'Lock & Continue'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

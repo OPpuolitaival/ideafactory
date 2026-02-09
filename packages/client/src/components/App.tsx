@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSessionStore } from '../store/index.js';
 import { useSSE } from '../hooks/useSSE.js';
 import { trpc } from '../trpc/index.js';
@@ -22,7 +22,7 @@ export function App() {
   const stage = useSessionStore((s) => s.stage);
   const [showSettings, setShowSettings] = useState(false);
   const [showDashboard, setShowDashboard] = useState(true);
-  const [thoughtsOpen, setThoughtsOpen] = useState(true);
+  const [viewingStage, setViewingStage] = useState<Stage | null>(null);
   const [rollbackTarget, setRollbackTarget] = useState<RollbackStage | null>(null);
 
   const rollbackMutation = trpc.session.rollback.useMutation();
@@ -30,6 +30,11 @@ export function App() {
   const utils = trpc.useUtils();
 
   useSSE(sessionId);
+
+  // Clear viewing state when the pipeline advances
+  useEffect(() => {
+    setViewingStage(null);
+  }, [stage]);
 
   const handleSessionStart = () => {
     setShowDashboard(false);
@@ -70,46 +75,63 @@ export function App() {
     );
   }
 
+  const displayStage = viewingStage ?? stage;
+  const isReadOnly = viewingStage !== null;
+
   const stageComponent = (() => {
-    switch (stage) {
+    switch (displayStage) {
       case 'taxonomy':
-        return <TaxonomyStage />;
+        return <TaxonomyStage readOnly={isReadOnly} />;
       case 'methods':
-        return <MethodsStage />;
+        return <MethodsStage readOnly={isReadOnly} />;
       case 'rubric':
-        return <RubricStage />;
+        return <RubricStage readOnly={isReadOnly} />;
       case 'factory':
       case 'completed':
         return <FactoryStage />;
       default:
-        return <TaxonomyStage />;
+        return <TaxonomyStage readOnly={isReadOnly} />;
     }
   })();
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="h-screen flex flex-col overflow-hidden">
       <Topbar
         onSettingsClick={() => setShowSettings(true)}
         onSessionsClick={handleBackToDashboard}
       />
-      <StageBar onStageClick={(s) => setRollbackTarget(s as RollbackStage)} />
+      <StageBar
+        viewingStage={viewingStage}
+        onStageClick={(s) => setViewingStage(viewingStage === s ? null : (s as Stage))}
+      />
       <ErrorBanner />
-      <div className="flex-1 flex overflow-hidden">
-        <main className="flex-1 overflow-y-auto p-6">{stageComponent}</main>
-        {thoughtsOpen && (
-          <aside className="w-80 border-l border-bg-3 flex flex-col">
-            <ThoughtFeed onClose={() => setThoughtsOpen(false)} />
-          </aside>
-        )}
-        {!thoughtsOpen && (
-          <button
-            onClick={() => setThoughtsOpen(true)}
-            className="fixed right-4 bottom-4 btn-secondary text-xs"
-          >
-            Show Thoughts
-          </button>
-        )}
-      </div>
+      {viewingStage && (
+        <div className="flex items-center justify-between px-6 py-2 bg-accent/5 border-b border-accent/20 text-sm">
+          <span className="text-accent-light">
+            Viewing <span className="font-medium">{viewingStage}</span> stage (read-only)
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setViewingStage(null)}
+              className="btn-ghost text-xs"
+            >
+              Back to current
+            </button>
+            <button
+              onClick={() => {
+                if (!viewingStage || viewingStage === 'completed') return;
+                setViewingStage(null);
+                setRollbackTarget(viewingStage);
+              }}
+              className="btn-ghost text-xs text-warning"
+            >
+              Edit from here...
+            </button>
+          </div>
+        </div>
+      )}
+      <main className="flex-1 overflow-y-auto p-6">{stageComponent}</main>
+      <ThoughtFeed />
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
       {rollbackTarget && (
         <RollbackModal
