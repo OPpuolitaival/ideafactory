@@ -9,10 +9,18 @@ export function ErrorBanner() {
   const isLoading = useSessionStore((s) => s.isLoading);
 
   const retryMutation = trpc.session.retry.useMutation();
+  const resumeMutation = trpc.session.resume.useMutation();
+
+  const progressQuery = trpc.session.getFactoryProgress.useQuery(
+    { sessionId: sessionId! },
+    { enabled: !!sessionId && errorStage === 'factory' },
+  );
 
   if (!error) return null;
 
   const stageLabel = STAGES.find((s) => s.id === errorStage)?.label ?? errorStage;
+  const canResume = errorStage === 'factory' && progressQuery.data != null && progressQuery.data.resumeFrom !== null;
+  const divergeCount = progressQuery.data?.divergeIdeaCount ?? 0;
 
   const handleRetry = async () => {
     if (!sessionId) return;
@@ -20,7 +28,16 @@ export function ErrorBanner() {
     try {
       await retryMutation.mutateAsync({ id: sessionId });
     } catch {
-      // If the retry mutation itself fails, restore error state
+      useSessionStore.setState({ isLoading: false });
+    }
+  };
+
+  const handleResume = async () => {
+    if (!sessionId) return;
+    useSessionStore.setState({ error: null, errorStage: null, isLoading: true });
+    try {
+      await resumeMutation.mutateAsync({ id: sessionId });
+    } catch {
       useSessionStore.setState({ isLoading: false });
     }
   };
@@ -39,6 +56,22 @@ export function ErrorBanner() {
         )}
         <span className="text-red-200 text-sm">{error}</span>
       </div>
+      {canResume && (
+        <button
+          onClick={handleResume}
+          disabled={isLoading}
+          className="btn-secondary text-xs shrink-0 border-accent/50 text-accent-light hover:bg-accent/20 disabled:opacity-50"
+        >
+          {isLoading ? (
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+              Resuming...
+            </span>
+          ) : (
+            `Resume (preserve ${divergeCount} ideas)`
+          )}
+        </button>
+      )}
       <button
         onClick={handleRetry}
         disabled={isLoading}
@@ -50,7 +83,7 @@ export function ErrorBanner() {
             Retrying...
           </span>
         ) : (
-          'Retry'
+          `Retry${canResume ? ' (start fresh)' : ''}`
         )}
       </button>
       <button

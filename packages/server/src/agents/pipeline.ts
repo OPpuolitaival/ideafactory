@@ -8,7 +8,11 @@ import { runMethodSelection, runRubricDesign } from './strategist.js';
 import { runFactory } from './factory.js';
 import { pipelineRegistry } from './registry.js';
 
-export async function runPipeline(sessionId: string, stage: Stage): Promise<void> {
+interface PipelineOptions {
+  resume?: boolean;
+}
+
+export async function runPipeline(sessionId: string, stage: Stage, options?: PipelineOptions): Promise<void> {
   const controller = pipelineRegistry.register(sessionId);
   const db = getDb();
   const config = loadConfig();
@@ -144,6 +148,7 @@ export async function runPipeline(sessionId: string, stage: Stage): Promise<void
           workerModel: sessionConfig.models?.worker ?? config.models.worker,
           analystModel: sessionConfig.models?.analyst ?? config.models.analyst,
           signal: controller.signal,
+          resume: options?.resume,
         });
 
         // Do NOT emit stage_complete — factory stays in interactive mode.

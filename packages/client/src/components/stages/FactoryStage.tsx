@@ -52,6 +52,8 @@ export function FactoryStage() {
     packagingInProgress,
     sessionId,
     stage,
+    isLoading,
+    error,
   } = useSessionStore();
 
   const isAutomating =
@@ -61,6 +63,15 @@ export function FactoryStage() {
   const elapsed = useElapsedTimer(isAutomating ? factoryStartedAt : null);
 
   const currentPhaseIdx = PHASES.indexOf(factoryPhase as (typeof PHASES)[number]);
+
+  // Detect stuck factory: page refreshed mid-run, no error stored, but partial data exists
+  const isStuck =
+    stage === 'factory' &&
+    !isLoading &&
+    !error &&
+    factoryPhase !== 'interactive' &&
+    factoryPhase !== 'complete' &&
+    workerIdeas.size > 0;
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -107,6 +118,11 @@ export function FactoryStage() {
         })}
       </div>
 
+      {/* Stuck Factory Banner */}
+      {isStuck && sessionId && (
+        <StuckFactoryBanner sessionId={sessionId} workerCount={workerIdeas.size} ideaCount={Array.from(workerIdeas.values()).reduce((sum, ideas) => sum + ideas.length, 0)} />
+      )}
+
       {/* Diverge View */}
       {(factoryPhase === 'diverge' || factoryPhase === 'idle') && (
         <DivergenceView workerIdeas={workerIdeas} />
@@ -130,6 +146,57 @@ export function FactoryStage() {
           isCompleted={stage === 'completed' || factoryPhase === 'complete'}
         />
       )}
+    </div>
+  );
+}
+
+// ---- Stuck Factory Banner ----
+
+function StuckFactoryBanner({ sessionId, workerCount, ideaCount }: { sessionId: string; workerCount: number; ideaCount: number }) {
+  const resumeMutation = trpc.session.resume.useMutation();
+  const retryMutation = trpc.session.retry.useMutation();
+  const isLoading = useSessionStore((s) => s.isLoading);
+
+  const handleResume = async () => {
+    useSessionStore.setState({ error: null, errorStage: null, isLoading: true });
+    try {
+      await resumeMutation.mutateAsync({ id: sessionId });
+    } catch {
+      useSessionStore.setState({ isLoading: false });
+    }
+  };
+
+  const handleRetry = async () => {
+    useSessionStore.setState({ error: null, errorStage: null, isLoading: true });
+    try {
+      await retryMutation.mutateAsync({ id: sessionId });
+    } catch {
+      useSessionStore.setState({ isLoading: false });
+    }
+  };
+
+  return (
+    <div className="bg-warning/10 border border-warning/30 rounded-lg px-4 py-3 mb-6 flex items-center gap-3">
+      <div className="flex-1 min-w-0">
+        <span className="text-warning text-sm font-medium">Factory interrupted</span>
+        <span className="text-gray-400 text-sm ml-2">
+          Found {workerCount} completed workers with {ideaCount} ideas.
+        </span>
+      </div>
+      <button
+        onClick={handleResume}
+        disabled={isLoading}
+        className="btn-secondary text-xs shrink-0 border-accent/50 text-accent-light hover:bg-accent/20 disabled:opacity-50"
+      >
+        {isLoading ? 'Resuming...' : 'Resume (preserve progress)'}
+      </button>
+      <button
+        onClick={handleRetry}
+        disabled={isLoading}
+        className="btn-secondary text-xs shrink-0 border-red-700/50 text-red-200 hover:bg-red-800/50 disabled:opacity-50"
+      >
+        {isLoading ? 'Retrying...' : 'Retry (start fresh)'}
+      </button>
     </div>
   );
 }

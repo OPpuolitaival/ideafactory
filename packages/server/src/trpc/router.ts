@@ -7,6 +7,7 @@ import { RubricSchema, SessionConfigSchema, STAGE_ORDER } from '@ideafactory/sha
 import type { Stage } from '@ideafactory/shared';
 import { getAllMethods, loadConfig } from '../config/index.js';
 import { runPipeline } from '../agents/pipeline.js';
+import { detectFactoryProgress } from '../agents/factory.js';
 import { runQAForIdeas } from '../agents/qa.js';
 import { packageIdeas } from '../agents/packaging.js';
 import { pipelineRegistry } from '../agents/registry.js';
@@ -502,6 +503,41 @@ const sessionRouter = router({
       });
 
       return { success: true };
+    }),
+
+  resume: publicProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const [session] = await ctx.db
+        .select()
+        .from(schema.sessions)
+        .where(eq(schema.sessions.id, input.id));
+
+      if (!session) throw new Error('Session not found');
+
+      const stage = session.status as Stage;
+      if (stage !== 'factory') throw new Error('Resume is only supported for the factory stage');
+
+      // Abort any running pipeline for this session
+      pipelineRegistry.abort(input.id);
+
+      // Wait briefly to let the aborted pipeline's in-flight operations settle
+      await new Promise((r) => setTimeout(r, 200));
+
+      // Do NOT delete ideas — that's the whole point of resume vs retry
+
+      // Re-fire the pipeline with resume flag
+      runPipeline(input.id, 'factory', { resume: true }).catch((err) => {
+        console.error(`Pipeline resume error for session ${input.id}:`, err);
+      });
+
+      return { success: true };
+    }),
+
+  getFactoryProgress: publicProcedure
+    .input(z.object({ sessionId: z.string() }))
+    .query(async ({ input }) => {
+      return detectFactoryProgress(input.sessionId);
     }),
 
   runQA: publicProcedure

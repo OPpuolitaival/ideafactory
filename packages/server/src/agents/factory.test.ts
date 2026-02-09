@@ -1098,3 +1098,386 @@ describe('Factory – Model routing', () => {
     expect(mockQuery.mock.calls[4][0].options.model).toBe('claude-sonnet-4-20250514');
   });
 });
+
+// ==========================================================================
+// Factory Resume
+// ==========================================================================
+
+describe('Factory – Resume', () => {
+  let runFactory: typeof import('./factory.js')['runFactory'];
+  let detectFactoryProgress: typeof import('./factory.js')['detectFactoryProgress'];
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    testDb = createTestDb();
+    const mod = await import('./factory.js');
+    runFactory = mod.runFactory;
+    detectFactoryProgress = mod.detectFactoryProgress;
+  });
+
+  // ---- detectFactoryProgress tests ----
+
+  it('detectFactoryProgress — empty DB returns resumeFrom: null', async () => {
+    await insertSession(testDb, 'sess-resume-empty');
+
+    const progress = await detectFactoryProgress('sess-resume-empty');
+
+    expect(progress.resumeFrom).toBeNull();
+    expect(progress.completedWorkerIds).toHaveLength(0);
+    expect(progress.divergeIdeaCount).toBe(0);
+    expect(progress.convergeIdeaCount).toBe(0);
+    expect(progress.evolveIdeaCount).toBe(0);
+  });
+
+  it('detectFactoryProgress — partial diverge returns resumeFrom: diverge', async () => {
+    await insertSession(testDb, 'sess-resume-pd');
+
+    // Pre-insert worker-0 ideas (only 1 of 2 workers done)
+    for (let j = 0; j < 2; j++) {
+      await testDb.insert(schema.ideas).values({
+        id: `pd-w0-${j}`,
+        sessionId: 'sess-resume-pd',
+        workerId: 'worker-0',
+        persona: 'First Principles',
+        method: 'First Principles',
+        name: `Idea ${j}`,
+        description: `Desc ${j}`,
+        phase: 'diverge',
+        data: JSON.stringify({ id: `worker-0-${j}`, workerId: 'worker-0', persona: 'First Principles', method: 'First Principles', name: `Idea ${j}`, description: `Desc ${j}`, probability: 'high' }),
+      });
+    }
+
+    const progress = await detectFactoryProgress('sess-resume-pd');
+
+    expect(progress.resumeFrom).toBe('diverge');
+    expect(progress.completedWorkerIds).toEqual(['worker-0']);
+    expect(progress.divergeIdeaCount).toBe(2);
+    expect(progress.convergeIdeaCount).toBe(0);
+    expect(progress.evolveIdeaCount).toBe(0);
+  });
+
+  it('detectFactoryProgress — full diverge returns resumeFrom: diverge', async () => {
+    await insertSession(testDb, 'sess-resume-fd');
+
+    // Pre-insert both workers' diverge ideas
+    for (const wIdx of [0, 1]) {
+      for (let j = 0; j < 2; j++) {
+        const method = wIdx === 0 ? 'First Principles' : 'TRIZ';
+        await testDb.insert(schema.ideas).values({
+          id: `fd-w${wIdx}-${j}`,
+          sessionId: 'sess-resume-fd',
+          workerId: `worker-${wIdx}`,
+          persona: method,
+          method,
+          name: `Idea ${wIdx}-${j}`,
+          description: `Desc ${wIdx}-${j}`,
+          phase: 'diverge',
+          data: JSON.stringify({ id: `worker-${wIdx}-${j}`, workerId: `worker-${wIdx}`, persona: method, method, name: `Idea ${wIdx}-${j}`, description: `Desc ${wIdx}-${j}`, probability: 'high' }),
+        });
+      }
+    }
+
+    const progress = await detectFactoryProgress('sess-resume-fd');
+
+    expect(progress.resumeFrom).toBe('diverge');
+    expect(progress.completedWorkerIds).toHaveLength(2);
+    expect(progress.divergeIdeaCount).toBe(4);
+  });
+
+  it('detectFactoryProgress — converge complete returns resumeFrom: evolve', async () => {
+    await insertSession(testDb, 'sess-resume-conv');
+
+    // Pre-insert diverge + converge ideas
+    await testDb.insert(schema.ideas).values({
+      id: 'conv-div-0',
+      sessionId: 'sess-resume-conv',
+      workerId: 'worker-0',
+      persona: 'First Principles',
+      method: 'First Principles',
+      name: 'Idea A',
+      description: 'Desc A',
+      phase: 'diverge',
+      data: JSON.stringify({ id: 'worker-0-0', name: 'Idea A', description: 'Desc A' }),
+    });
+    await testDb.insert(schema.ideas).values({
+      id: 'conv-scored-0',
+      sessionId: 'sess-resume-conv',
+      name: 'Idea A Scored',
+      description: 'Desc A Scored',
+      phase: 'converge',
+      score: 19,
+      eliminated: 0,
+      data: JSON.stringify({ id: 'conv-scored-0', name: 'Idea A Scored', description: 'Desc A Scored', totalScore: 19, eliminated: false, gateResults: [], criteriaScores: [] }),
+    });
+
+    const progress = await detectFactoryProgress('sess-resume-conv');
+
+    expect(progress.resumeFrom).toBe('evolve');
+    expect(progress.convergeIdeaCount).toBe(1);
+  });
+
+  it('detectFactoryProgress — evolve complete returns resumeFrom: interactive', async () => {
+    await insertSession(testDb, 'sess-resume-evo');
+
+    // Pre-insert all three phases
+    await testDb.insert(schema.ideas).values({
+      id: 'evo-div-0', sessionId: 'sess-resume-evo', workerId: 'worker-0', persona: 'First Principles', method: 'First Principles',
+      name: 'Idea A', description: 'Desc A', phase: 'diverge', data: '{}',
+    });
+    await testDb.insert(schema.ideas).values({
+      id: 'evo-conv-0', sessionId: 'sess-resume-evo', name: 'Idea A Scored', description: 'Desc', phase: 'converge',
+      score: 19, eliminated: 0, data: JSON.stringify({ id: 'evo-conv-0', name: 'Idea A', totalScore: 19, eliminated: false, gateResults: [], criteriaScores: [] }),
+    });
+    await testDb.insert(schema.ideas).values({
+      id: 'evo-evol-0', sessionId: 'sess-resume-evo', name: 'Hybrid', description: 'Evolved', phase: 'evolve',
+      score: 23, eliminated: 0, data: JSON.stringify({ id: 'evo-evol-0', name: 'Hybrid', totalScore: 23, eliminated: false, gateResults: [], criteriaScores: [] }),
+    });
+
+    const progress = await detectFactoryProgress('sess-resume-evo');
+
+    expect(progress.resumeFrom).toBe('interactive');
+    expect(progress.evolveIdeaCount).toBe(1);
+  });
+
+  // ---- resume=true behavior tests ----
+
+  it('resume=true skips completed workers and runs only missing ones', async () => {
+    await insertSession(testDb, 'sess-resume-skip');
+
+    // Pre-insert worker-0 ideas
+    for (let j = 0; j < 2; j++) {
+      await testDb.insert(schema.ideas).values({
+        id: `skip-w0-${j}`,
+        sessionId: 'sess-resume-skip',
+        workerId: 'worker-0',
+        persona: 'First Principles',
+        method: 'First Principles',
+        name: `Idea ${j}`,
+        description: `Desc ${j}`,
+        probability: 'high',
+        phase: 'diverge',
+        data: JSON.stringify({ id: `worker-0-${j}`, workerId: 'worker-0', persona: 'First Principles', method: 'First Principles', name: `Idea ${j}`, description: `Desc ${j}`, probability: 'high' }),
+      });
+    }
+
+    // Mock: only need worker-1 diverge + converge + evolve + rescore = 4 calls
+    mockQuery
+      .mockReturnValueOnce(queryResult(JSON.stringify(worker1Ideas)))
+      .mockReturnValueOnce(queryResult(JSON.stringify(scoredIdeas)))
+      .mockReturnValueOnce(queryResult(JSON.stringify(evolvedConcepts)))
+      .mockReturnValueOnce(queryResult(JSON.stringify(rescoredEvolved)));
+
+    await runFactory({ ...factoryOptions('sess-resume-skip'), resume: true });
+
+    // Only 4 LLM calls (not 5): worker-1 diverge, converge batch, evolution, rescore
+    expect(mockQuery).toHaveBeenCalledTimes(4);
+
+    // Worker-0 ideas should still be in DB
+    const worker0Rows = await testDb
+      .select()
+      .from(schema.ideas)
+      .where(and(eq(schema.ideas.sessionId, 'sess-resume-skip'), eq(schema.ideas.phase, 'diverge'), eq(schema.ideas.workerId, 'worker-0')));
+    expect(worker0Rows).toHaveLength(2);
+
+    // Worker-1 ideas should also be in DB
+    const worker1Rows = await testDb
+      .select()
+      .from(schema.ideas)
+      .where(and(eq(schema.ideas.sessionId, 'sess-resume-skip'), eq(schema.ideas.phase, 'diverge'), eq(schema.ideas.workerId, 'worker-1')));
+    expect(worker1Rows).toHaveLength(2);
+  });
+
+  it('resume=true preserves existing diverge ideas in DB', async () => {
+    await insertSession(testDb, 'sess-resume-preserve');
+
+    // Pre-insert worker-0 ideas with specific names
+    for (let j = 0; j < 2; j++) {
+      await testDb.insert(schema.ideas).values({
+        id: `preserve-w0-${j}`,
+        sessionId: 'sess-resume-preserve',
+        workerId: 'worker-0',
+        persona: 'First Principles',
+        method: 'First Principles',
+        name: `Preserved Idea ${j}`,
+        description: `Original desc ${j}`,
+        probability: 'high',
+        phase: 'diverge',
+        data: JSON.stringify({ id: `worker-0-${j}`, workerId: 'worker-0', persona: 'First Principles', method: 'First Principles', name: `Preserved Idea ${j}`, description: `Original desc ${j}`, probability: 'high' }),
+      });
+    }
+
+    mockQuery
+      .mockReturnValueOnce(queryResult(JSON.stringify(worker1Ideas)))
+      .mockReturnValueOnce(queryResult(JSON.stringify(scoredIdeas)))
+      .mockReturnValueOnce(queryResult(JSON.stringify(evolvedConcepts)))
+      .mockReturnValueOnce(queryResult(JSON.stringify(rescoredEvolved)));
+
+    await runFactory({ ...factoryOptions('sess-resume-preserve'), resume: true });
+
+    // Verify the original worker-0 ideas are untouched
+    const w0Rows = await testDb
+      .select()
+      .from(schema.ideas)
+      .where(and(eq(schema.ideas.sessionId, 'sess-resume-preserve'), eq(schema.ideas.workerId, 'worker-0'), eq(schema.ideas.phase, 'diverge')));
+
+    expect(w0Rows).toHaveLength(2);
+    expect(w0Rows[0].name).toBe('Preserved Idea 0');
+    expect(w0Rows[1].name).toBe('Preserved Idea 1');
+  });
+
+  it('resume=true with converge done re-runs evolve', async () => {
+    await insertSession(testDb, 'sess-resume-evo-rerun');
+
+    // Pre-insert diverge ideas
+    await testDb.insert(schema.ideas).values({
+      id: 'evo-rerun-div-0', sessionId: 'sess-resume-evo-rerun', workerId: 'worker-0',
+      persona: 'First Principles', method: 'First Principles', name: 'Idea A', description: 'Desc A',
+      phase: 'diverge', data: '{}',
+    });
+
+    // Pre-insert converge survivors
+    const survivorData = { id: 'evo-rerun-conv-0', sourceIds: ['worker-0-0'], name: 'Idea A Scored', description: 'Desc A', gateResults: [{ gateId: 'g1', pass: true, reason: 'OK' }], criteriaScores: [{ criterionId: 'c1', score: 4, reason: 'OK' }], totalScore: 19, eliminated: false };
+    await testDb.insert(schema.ideas).values({
+      id: 'evo-rerun-conv-0', sessionId: 'sess-resume-evo-rerun', name: 'Idea A Scored', description: 'Desc A',
+      phase: 'converge', score: 19, eliminated: 0, data: JSON.stringify(survivorData),
+    });
+    const survivorData2 = { ...survivorData, id: 'evo-rerun-conv-1', name: 'Idea B Scored', totalScore: 18 };
+    await testDb.insert(schema.ideas).values({
+      id: 'evo-rerun-conv-1', sessionId: 'sess-resume-evo-rerun', name: 'Idea B Scored', description: 'Desc B',
+      phase: 'converge', score: 18, eliminated: 0, data: JSON.stringify(survivorData2),
+    });
+
+    // Mock: evolution worker + rescore = 2 LLM calls
+    mockQuery
+      .mockReturnValueOnce(queryResult(JSON.stringify(evolvedConcepts)))
+      .mockReturnValueOnce(queryResult(JSON.stringify(rescoredEvolved)));
+
+    await runFactory({ ...factoryOptions('sess-resume-evo-rerun'), resume: true });
+
+    // Only 2 LLM calls: evolution + rescore
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+
+    // Converge ideas should still be in DB
+    const convergeRows = await testDb
+      .select()
+      .from(schema.ideas)
+      .where(and(eq(schema.ideas.sessionId, 'sess-resume-evo-rerun'), eq(schema.ideas.phase, 'converge')));
+    expect(convergeRows).toHaveLength(2);
+
+    // Evolve ideas should now exist
+    const evolveRows = await testDb
+      .select()
+      .from(schema.ideas)
+      .where(and(eq(schema.ideas.sessionId, 'sess-resume-evo-rerun'), eq(schema.ideas.phase, 'evolve')));
+    expect(evolveRows.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('resume=true with all phases done re-emits interactive with 0 LLM calls', async () => {
+    await insertSession(testDb, 'sess-resume-interactive');
+
+    // Pre-insert all phases
+    await testDb.insert(schema.ideas).values({
+      id: 'int-div-0', sessionId: 'sess-resume-interactive', workerId: 'worker-0',
+      persona: 'First Principles', method: 'First Principles', name: 'Idea A', description: 'Desc A',
+      phase: 'diverge', data: '{}',
+    });
+    const convergeData = { id: 'int-conv-0', name: 'Scored A', description: 'Desc', totalScore: 19, eliminated: false, gateResults: [], criteriaScores: [] };
+    await testDb.insert(schema.ideas).values({
+      id: 'int-conv-0', sessionId: 'sess-resume-interactive', name: 'Scored A', description: 'Desc',
+      phase: 'converge', score: 19, eliminated: 0, data: JSON.stringify(convergeData),
+    });
+    const evolveData = { id: 'int-evo-0', name: 'Hybrid', description: 'Evolved', totalScore: 23, eliminated: false, gateResults: [], criteriaScores: [] };
+    await testDb.insert(schema.ideas).values({
+      id: 'int-evo-0', sessionId: 'sess-resume-interactive', name: 'Hybrid', description: 'Evolved',
+      phase: 'evolve', score: 23, eliminated: 0, data: JSON.stringify(evolveData),
+    });
+
+    await runFactory({ ...factoryOptions('sess-resume-interactive'), resume: true });
+
+    // 0 LLM calls
+    expect(mockQuery).toHaveBeenCalledTimes(0);
+
+    // factory:interactive should be emitted with the combined pool
+    const interactiveEvents = mockEmit.mock.calls.filter(
+      ([sid, evt]: [string, { type: string }]) =>
+        sid === 'sess-resume-interactive' && evt.type === 'factory:interactive',
+    );
+    expect(interactiveEvents).toHaveLength(1);
+    const pool = interactiveEvents[0][1].data.combinedPool;
+    expect(pool).toHaveLength(2); // 1 converge survivor + 1 evolved
+    expect(pool.map((i: { name: string }) => i.name).sort()).toEqual(['Hybrid', 'Scored A']);
+  });
+
+  it('resume=false (default) deletes all ideas — backward compat', async () => {
+    await insertSession(testDb, 'sess-resume-default');
+
+    // Pre-insert some ideas
+    await testDb.insert(schema.ideas).values({
+      id: 'default-div-0', sessionId: 'sess-resume-default', workerId: 'worker-0',
+      persona: 'First Principles', method: 'First Principles', name: 'Old Idea', description: 'Old',
+      phase: 'diverge', data: '{}',
+    });
+
+    setupFullPipelineMocks();
+
+    await runFactory(factoryOptions('sess-resume-default'));
+
+    // The old idea should be gone (deleted before fresh run)
+    const allRows = await testDb
+      .select()
+      .from(schema.ideas)
+      .where(eq(schema.ideas.sessionId, 'sess-resume-default'));
+
+    const oldIdea = allRows.find((r) => r.name === 'Old Idea');
+    expect(oldIdea).toBeUndefined();
+  });
+
+  it('resume=true with no data throws "Nothing to resume"', async () => {
+    await insertSession(testDb, 'sess-resume-nothing');
+
+    await expect(
+      runFactory({ ...factoryOptions('sess-resume-nothing'), resume: true }),
+    ).rejects.toThrow(/Nothing to resume/);
+
+    expect(mockQuery).toHaveBeenCalledTimes(0);
+  });
+
+  it('resume=true emits "Resumed" thought for skipped workers', async () => {
+    await insertSession(testDb, 'sess-resume-thought');
+
+    // Pre-insert worker-0 ideas
+    for (let j = 0; j < 2; j++) {
+      await testDb.insert(schema.ideas).values({
+        id: `thought-w0-${j}`,
+        sessionId: 'sess-resume-thought',
+        workerId: 'worker-0',
+        persona: 'First Principles',
+        method: 'First Principles',
+        name: `Idea ${j}`,
+        description: `Desc ${j}`,
+        probability: 'high',
+        phase: 'diverge',
+        data: JSON.stringify({ id: `worker-0-${j}`, workerId: 'worker-0', persona: 'First Principles', method: 'First Principles', name: `Idea ${j}`, description: `Desc ${j}`, probability: 'high' }),
+      });
+    }
+
+    mockQuery
+      .mockReturnValueOnce(queryResult(JSON.stringify(worker1Ideas)))
+      .mockReturnValueOnce(queryResult(JSON.stringify(scoredIdeas)))
+      .mockReturnValueOnce(queryResult(JSON.stringify(evolvedConcepts)))
+      .mockReturnValueOnce(queryResult(JSON.stringify(rescoredEvolved)));
+
+    await runFactory({ ...factoryOptions('sess-resume-thought'), resume: true });
+
+    // Should emit "Resumed: 2 ideas already in DB" for worker-0
+    const resumedEvents = mockEmit.mock.calls.filter(
+      ([sid, evt]: [string, { type: string; data: { text?: string } }]) =>
+        sid === 'sess-resume-thought' &&
+        evt.type === 'agent:thought' &&
+        evt.data.text?.includes('Resumed:'),
+    );
+    expect(resumedEvents.length).toBeGreaterThanOrEqual(1);
+    expect(resumedEvents[0][1].data.text).toContain('2 ideas already in DB');
+    expect(resumedEvents[0][1].data.agent).toContain('First Principles');
+  });
+});
