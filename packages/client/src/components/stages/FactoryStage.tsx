@@ -132,13 +132,16 @@ export function FactoryStage() {
       {factoryPhase === 'converge' && <ConvergenceView ideas={scoredIdeas} />}
 
       {/* Evolve View */}
-      {factoryPhase === 'evolve' && <EvolutionView ideas={evolvedIdeas} />}
+      {factoryPhase === 'evolve' && (
+        <EvolutionView ideas={evolvedIdeas} scoredIdeas={scoredIdeas} />
+      )}
 
       {/* Interactive View */}
       {(factoryPhase === 'interactive' || factoryPhase === 'complete') && (
         <InteractiveView
           sessionId={sessionId}
           combinedPool={combinedPool}
+          scoredIdeas={scoredIdeas}
           qaSheets={qaSheets}
           ideaPackages={ideaPackages}
           qaInProgress={qaInProgress}
@@ -268,7 +271,7 @@ function ConvergenceView({ ideas }: { ideas: ScoredIdea[] }) {
         <div key={idea.id} className={`card ${idea.eliminated ? 'opacity-40' : ''}`}>
           <div className="flex items-start justify-between">
             <div>
-              <h4 className={`font-medium ${idea.eliminated ? 'line-through' : ''}`}>
+              <h4 className="font-medium">
                 {idea.name}
               </h4>
               <p className="text-sm text-gray-400 mt-1">{idea.description}</p>
@@ -292,7 +295,16 @@ function ConvergenceView({ ideas }: { ideas: ScoredIdea[] }) {
   );
 }
 
-function EvolutionView({ ideas }: { ideas: ScoredIdea[] }) {
+function EvolutionView({
+  ideas,
+  scoredIdeas,
+}: {
+  ideas: ScoredIdea[];
+  scoredIdeas: ScoredIdea[];
+}) {
+  const [showEliminated, setShowEliminated] = useState(false);
+  const eliminated = scoredIdeas.filter((i) => i.eliminated);
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-400">
@@ -309,6 +321,38 @@ function EvolutionView({ ideas }: { ideas: ScoredIdea[] }) {
           <p className="text-sm text-gray-400 mt-2">{idea.description}</p>
         </div>
       ))}
+
+      {eliminated.length > 0 && (
+        <div className="mt-6">
+          <button
+            onClick={() => setShowEliminated((prev) => !prev)}
+            className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            <span className="text-base">{showEliminated ? '\u25BE' : '\u25B8'}</span>
+            Eliminated during convergence ({eliminated.length})
+          </button>
+          {showEliminated && (
+            <div className="space-y-2 mt-3">
+              {eliminated.map((idea) => (
+                <div key={idea.id} className="card opacity-40">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <h4 className="font-medium">{idea.name}</h4>
+                      <p className="text-sm text-gray-400 mt-1">{idea.description}</p>
+                    </div>
+                    <div className="text-right shrink-0 ml-4">
+                      <span className="badge bg-danger/20 text-danger">Eliminated</span>
+                    </div>
+                  </div>
+                  {idea.eliminationReason && (
+                    <p className="text-xs text-danger mt-2">{idea.eliminationReason}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -316,6 +360,7 @@ function EvolutionView({ ideas }: { ideas: ScoredIdea[] }) {
 function InteractiveView({
   sessionId,
   combinedPool,
+  scoredIdeas,
   qaSheets,
   ideaPackages,
   qaInProgress,
@@ -324,6 +369,7 @@ function InteractiveView({
 }: {
   sessionId: string | null;
   combinedPool: ScoredIdea[];
+  scoredIdeas: ScoredIdea[];
   qaSheets: QAResult[];
   ideaPackages: IdeaPackage[];
   qaInProgress: boolean;
@@ -331,6 +377,8 @@ function InteractiveView({
   isCompleted: boolean;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [showEliminated, setShowEliminated] = useState(false);
   const store = useSessionStore();
 
   const runQAMutation = trpc.session.runQA.useMutation();
@@ -350,6 +398,18 @@ function InteractiveView({
       return next;
     });
   };
+
+  const toggleExpanded = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const eliminated = scoredIdeas.filter((i) => i.eliminated);
 
   const allSelectedHaveQA =
     selected.size > 0 && Array.from(selected).every((id) => qaSheetMap.has(id));
@@ -529,6 +589,7 @@ function InteractiveView({
             const hasQA = qaSheetMap.has(idea.id);
             const hasPkg = pkgMap.has(idea.id);
             const isSelected = selected.has(idea.id);
+            const isExpanded = expanded.has(idea.id);
 
             return (
               <div
@@ -547,21 +608,32 @@ function InteractiveView({
                     className="accent-accent shrink-0"
                   />
                 )}
+                <button
+                  onClick={(e) => toggleExpanded(idea.id, e)}
+                  className="text-gray-500 hover:text-gray-300 text-base shrink-0 p-1"
+                  title={isExpanded ? 'Collapse' : 'Expand'}
+                >
+                  {isExpanded ? '\u25BE' : '\u25B8'}
+                </button>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <h4 className="font-medium truncate">{idea.name}</h4>
+                    <h4 className={`font-medium ${isExpanded ? '' : 'truncate'}`}>
+                      {idea.name}
+                    </h4>
                     {hasQA && (
-                      <span className="badge bg-success/20 text-success text-xs">
+                      <span className="badge bg-success/20 text-success text-xs shrink-0">
                         QA'd
                       </span>
                     )}
                     {hasPkg && (
-                      <span className="badge bg-accent/20 text-accent text-xs">
+                      <span className="badge bg-accent/20 text-accent text-xs shrink-0">
                         Packaged
                       </span>
                     )}
                   </div>
-                  <p className="text-sm text-gray-400 truncate">{idea.description}</p>
+                  <p className={`text-sm text-gray-400 ${isExpanded ? '' : 'truncate'}`}>
+                    {idea.description}
+                  </p>
                 </div>
                 <span className="text-lg font-bold text-accent shrink-0">
                   {idea.totalScore.toFixed(1)}
@@ -571,6 +643,57 @@ function InteractiveView({
           })}
         </div>
       </section>
+
+      {/* Eliminated Ideas */}
+      {eliminated.length > 0 && (
+        <section>
+          <button
+            onClick={() => setShowEliminated((prev) => !prev)}
+            className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            <span className="text-base">{showEliminated ? '\u25BE' : '\u25B8'}</span>
+            Eliminated Ideas ({eliminated.length})
+          </button>
+          {showEliminated && (
+            <div className="space-y-2 mt-3">
+              {eliminated.map((idea) => {
+                const isExpanded = expanded.has(idea.id);
+                return (
+                  <div key={idea.id} className="card opacity-50 flex items-center gap-4">
+                    <button
+                      onClick={(e) => toggleExpanded(idea.id, e)}
+                      className="text-gray-500 hover:text-gray-300 text-base shrink-0 p-1"
+                      title={isExpanded ? 'Collapse' : 'Expand'}
+                    >
+                      {isExpanded ? '\u25BE' : '\u25B8'}
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <h4 className={`font-medium ${isExpanded ? '' : 'truncate'}`}>
+                        {idea.name}
+                      </h4>
+                      <p className={`text-sm text-gray-400 ${isExpanded ? '' : 'truncate'}`}>
+                        {idea.description}
+                      </p>
+                      {idea.eliminationReason && (
+                        <p className="text-xs text-danger mt-1">{idea.eliminationReason}</p>
+                      )}
+                    </div>
+                    <div className="text-right shrink-0 ml-4">
+                      {idea.totalScore > 0 ? (
+                        <span className="text-sm text-gray-500">
+                          {idea.totalScore.toFixed(1)}
+                        </span>
+                      ) : (
+                        <span className="badge bg-danger/20 text-danger">Eliminated</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Complete Session */}
       {!isCompleted && (
