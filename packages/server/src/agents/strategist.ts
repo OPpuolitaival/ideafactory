@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { MethodRecommendationSchema, RubricSchema } from '@ideafactory/shared';
 import type { Method } from '@ideafactory/shared';
 import { callLLMWithRetry } from './llm.js';
+import { coerceAndParse } from './coerce.js';
 import { methodRecommendationJsonSchema, rubricJsonSchema } from './schemas.js';
 import { sseManager } from '../sse/index.js';
 import { getDb, schema } from '../db/index.js';
@@ -72,10 +73,7 @@ Return ONLY the JSON object. No markdown, no code blocks, no extra text.`,
       sessionId,
       agentName: 'Strategist',
     },
-    (jsonStr) => {
-      const parsed = JSON.parse(jsonStr);
-      return MethodRecommendationSchema.parse(parsed);
-    },
+    (jsonStr) => coerceAndParse(jsonStr, MethodRecommendationSchema),
   );
 
   // Persist to database
@@ -157,10 +155,7 @@ Return ONLY the JSON object. No markdown, no code blocks, no extra text.`,
       sessionId,
       agentName: 'Strategist',
     },
-    (jsonStr) => {
-      const parsed = JSON.parse(jsonStr);
-      return RubricSchema.parse(parsed);
-    },
+    (jsonStr) => coerceAndParse(jsonStr, RubricSchema),
   );
 
   // Persist to database

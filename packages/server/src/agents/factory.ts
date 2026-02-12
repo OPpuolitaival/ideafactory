@@ -6,6 +6,7 @@ import type { Method, Rubric, RawIdea, ScoredIdea, EvolvedConcept } from '@ideaf
 import { RawIdeaSchema, ScoredIdeaSchema, EvolvedConceptSchema } from '@ideafactory/shared';
 import { z } from 'zod';
 import { callLLMWithRetry } from './llm.js';
+import { coerceAndParse } from './coerce.js';
 import {
   rawIdeaArrayJsonSchema,
   scoredIdeaArrayJsonSchema,
@@ -383,10 +384,7 @@ Return ONLY the JSON array, no other text.`,
             timeoutMs: 120_000,
             signal,
           },
-          (jsonStr) => {
-            const parsed = JSON.parse(jsonStr);
-            return z.array(ScoredIdeaSchema).parse(parsed);
-          },
+          (jsonStr) => coerceAndParse(jsonStr, z.array(ScoredIdeaSchema)),
         );
 
         return scored;
@@ -556,10 +554,7 @@ Return ONLY a JSON array of idea objects. No other text.`,
             timeoutMs: 180_000,
             signal,
           },
-          (jsonStr) => {
-            const parsed = JSON.parse(jsonStr);
-            return z.array(RawIdeaSchema.omit({ workerId: true, persona: true })).parse(parsed);
-          },
+          (jsonStr) => coerceAndParse(jsonStr, z.array(RawIdeaSchema.omit({ workerId: true, persona: true }))),
         );
 
         // Enrich with worker metadata — persona = method name
@@ -815,10 +810,7 @@ Return ONLY the JSON array, no other text.`,
           timeoutMs: 180_000,
           signal,
         },
-        (jsonStr) => {
-          const parsed = JSON.parse(jsonStr);
-          return z.array(EvolvedConceptSchema).parse(parsed);
-        },
+        (jsonStr) => coerceAndParse(jsonStr, z.array(EvolvedConceptSchema)),
       );
 
       return concepts;

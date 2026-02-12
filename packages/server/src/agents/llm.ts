@@ -420,6 +420,7 @@ export async function callLLMWithRetry<T>(
   const MAX_RATE_LIMIT_RETRIES = 10;
   // Clone options so we can mutate prompt/outputSchema for retries without affecting the caller
   const retryOptions = { ...options, prompt: options.prompt };
+  const originalPrompt = options.prompt;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -538,7 +539,7 @@ export async function callLLMWithRetry<T>(
           });
         }
       } else {
-        // Parse error — append JSON fix instruction
+        // Parse error — use fixed retry suffix (never grows across retries)
         if (options.sessionId && options.agentName) {
           sseManager.emit(options.sessionId, {
             type: 'agent:thought',
@@ -549,9 +550,7 @@ export async function callLLMWithRetry<T>(
             },
           });
         }
-        // Strip any SDK stderr from the error message to keep the prompt clean
-        const cleanError = lastError.message.split('\nSDK stderr:')[0];
-        retryOptions.prompt += `\n\nIMPORTANT: Your previous response had an error: ${cleanError}. Please return ONLY valid JSON matching the required schema. No markdown, no code blocks, no explanatory text — just the JSON object/array.`;
+        retryOptions.prompt = originalPrompt + '\n\nYour previous response could not be parsed as valid JSON. Return ONLY the JSON array or object — no markdown fences, no explanatory text, no comments. Start your response with [ or { and end with ] or }.';
       }
     }
   }

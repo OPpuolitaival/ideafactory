@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { TaxonomyNodeSchema } from '@ideafactory/shared';
 import type { TaxonomyNode } from '@ideafactory/shared';
 import { callLLMWithRetry } from './llm.js';
+import { coerceAndParse } from './coerce.js';
 import { taxonomyJsonSchema } from './schemas.js';
 import { sseManager } from '../sse/index.js';
 import { getDb, schema } from '../db/index.js';
@@ -72,10 +73,7 @@ Return ONLY the JSON object. No markdown, no code blocks, no extra text.`,
       sessionId,
       agentName: 'Navigator',
     },
-    (jsonStr) => {
-      const parsed = JSON.parse(jsonStr);
-      return TaxonomyNodeSchema.parse(parsed);
-    },
+    (jsonStr) => coerceAndParse(jsonStr, TaxonomyNodeSchema),
   );
 }
 
@@ -142,10 +140,7 @@ Return ONLY the JSON object. No markdown, no code blocks, no extra text.`,
       sessionId,
       agentName: branchAgent,
     },
-    (jsonStr) => {
-      const parsed = JSON.parse(jsonStr);
-      return TaxonomyNodeSchema.parse(parsed);
-    },
+    (jsonStr) => coerceAndParse(jsonStr, TaxonomyNodeSchema),
   );
 }
 

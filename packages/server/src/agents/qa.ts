@@ -2,10 +2,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { nanoid } from 'nanoid';
-import { z } from 'zod';
 import { QAResultSchema } from '@ideafactory/shared';
 import type { Rubric } from '@ideafactory/shared';
 import { callLLMWithRetry } from './llm.js';
+import { coerceAndParse } from './coerce.js';
 import { qaResultJsonSchema } from './schemas.js';
 import { sseManager } from '../sse/index.js';
 import { getDb, schema } from '../db/index.js';
@@ -91,10 +91,7 @@ Return ONLY the JSON object, no other text.`,
           timeoutMs: 120_000,
           signal,
         },
-        (jsonStr) => {
-          const parsed = JSON.parse(jsonStr);
-          return QAResultSchema.parse(parsed);
-        },
+        (jsonStr) => coerceAndParse(jsonStr, QAResultSchema),
       );
 
       // Persist to qa_sheets

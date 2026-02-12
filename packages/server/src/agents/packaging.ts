@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { nanoid } from 'nanoid';
 import { IdeaPackageSchema } from '@ideafactory/shared';
 import { callLLMWithRetry } from './llm.js';
+import { coerceAndParse } from './coerce.js';
 import { ideaPackageJsonSchema } from './schemas.js';
 import { sseManager } from '../sse/index.js';
 import { getDb, schema } from '../db/index.js';
@@ -88,10 +89,7 @@ Return a single JSON object with ideaId, ideaName, htmlContent, and deepResearch
           timeoutMs: 180_000,
           signal,
         },
-        (jsonStr) => {
-          const parsed = JSON.parse(jsonStr);
-          return IdeaPackageSchema.parse(parsed);
-        },
+        (jsonStr) => coerceAndParse(jsonStr, IdeaPackageSchema),
       );
 
       // Persist to idea_packages
