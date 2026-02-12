@@ -1,9 +1,10 @@
 import { useSessionStore } from '../store/index.js';
-import { STAGES, STAGE_ORDER, MODEL_OPTIONS } from '@ideafactory/shared';
+import type { ModelOption } from '../store/index.js';
+import { STAGES, STAGE_ORDER } from '@ideafactory/shared';
 import type { Stage } from '@ideafactory/shared';
 
-function getModelColor(model?: string): string | undefined {
-  const opt = MODEL_OPTIONS.find((m) => m.id === model);
+function getModelColor(modelOptions: ModelOption[], model?: string): string | undefined {
+  const opt = modelOptions.find((m) => m.id === model);
   return opt?.color;
 }
 
@@ -16,6 +17,7 @@ export function StageBar({ onStageClick, viewingStage }: StageBarProps) {
   const currentStage = useSessionStore((s) => s.stage);
   const isLoading = useSessionStore((s) => s.isLoading);
   const stageModels = useSessionStore((s) => s.stageModels);
+  const modelOptions = useSessionStore((s) => s.modelOptions);
   const currentIdx = STAGE_ORDER.indexOf(currentStage);
 
   return (
@@ -67,7 +69,7 @@ export function StageBar({ onStageClick, viewingStage }: StageBarProps) {
                 {isComplete && stageModels[stage.id] && (
                   <span
                     className="w-1.5 h-1.5 rounded-full"
-                    style={{ backgroundColor: getModelColor(stageModels[stage.id]) }}
+                    style={{ backgroundColor: getModelColor(modelOptions, stageModels[stage.id]) }}
                   />
                 )}
               </div>

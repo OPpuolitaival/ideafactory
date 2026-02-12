@@ -1,4 +1,4 @@
-import { MODEL_OPTIONS } from '@ideafactory/shared';
+import { useSessionStore } from '../store/index.js';
 
 interface ModelSelectorProps {
   role: string;
@@ -8,11 +8,13 @@ interface ModelSelectorProps {
 }
 
 export function ModelSelector({ role, value, onChange, disabled }: ModelSelectorProps) {
+  const modelOptions = useSessionStore((s) => s.modelOptions);
+
   return (
     <div className="flex items-center justify-between gap-4">
       <span className="text-sm text-gray-300 min-w-[80px]">{role}</span>
       <div className="flex gap-1.5">
-        {MODEL_OPTIONS.map((opt) => {
+        {modelOptions.map((opt) => {
           const selected = value === opt.id;
           return (
             <button

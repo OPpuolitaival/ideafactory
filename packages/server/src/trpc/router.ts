@@ -5,7 +5,7 @@ import { router, publicProcedure } from './trpc.js';
 import { schema } from '../db/index.js';
 import { RubricSchema, SessionConfigSchema, STAGE_ORDER } from '@ideafactory/shared';
 import type { Stage } from '@ideafactory/shared';
-import { getAllMethods, loadConfig } from '../config/index.js';
+import { getAllMethods, getModelOptions, loadConfig } from '../config/index.js';
 import { runPipeline } from '../agents/pipeline.js';
 import { detectFactoryProgress } from '../agents/factory.js';
 import { runQAForIdeas } from '../agents/qa.js';
@@ -642,6 +642,9 @@ const configRouter = router({
     };
   }),
 
+  getModelOptions: publicProcedure.query(() => {
+    return getModelOptions();
+  }),
 });
 
 export const appRouter = router({

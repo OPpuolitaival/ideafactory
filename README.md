@@ -107,28 +107,59 @@ SQLite via better-sqlite3 + drizzle-orm, stored at `~/.ideafactory/data.db`. Eig
 
 ## Configuration
 
-Optional config file at `~/.ideafactory/config.yaml`:
+Configuration is resolved in priority order: **session config > `.env` / env vars > `config.yaml` > defaults**.
+
+### Environment Variables (`.env`)
+
+Copy `.env.example` to `.env` at the project root:
+
+```bash
+cp .env.example .env
+```
+
+Supported variables:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-xxx               # Or use Claude Code session auth
+
+# Model versions — what each tier resolves to
+HAIKU_MODEL=claude-haiku-4-5-20251001
+SONNET_MODEL=claude-sonnet-4-5-20250929
+OPUS_MODEL=claude-opus-4-6
+
+# Model assignment per agent role
+MODEL_DEFAULT=claude-opus-4-6
+MODEL_NAVIGATOR=claude-opus-4-6
+MODEL_STRATEGIST=claude-opus-4-6
+MODEL_WORKER=claude-opus-4-6
+MODEL_ANALYST=claude-opus-4-6
+
+PORT=3000
+IDEAS_PER_WORKER=15
+WEB_SEARCH=false
+```
+
+### Config File (`config.yaml`)
+
+Optional per-user config at `~/.ideafactory/config.yaml`:
 
 ```yaml
-# Model selection per agent role
 models:
-  default: claude-opus-4-6      # Fallback for all roles
-  navigator: claude-haiku-4-5-20251001    # Taxonomy exploration (fast)
-  strategist: claude-sonnet-4-5-20250929  # Method selection & rubric design
-  worker: claude-sonnet-4-5-20250929      # Idea generation workers
-  analyst: claude-opus-4-6      # Convergence scoring & QA
+  default: claude-opus-4-6
+  navigator: claude-opus-4-6
+  strategist: claude-opus-4-6
+  worker: claude-opus-4-6
+  analyst: claude-opus-4-6
 
-# Pipeline defaults
 defaults:
-  ideasPerWorker: 15   # 5–30 ideas per worker (default: 15)
-  webSearch: false      # Enable web search in agents
+  ideasPerWorker: 15
+  webSearch: false
 
-# Server
 server:
   port: 3000
 ```
 
-Available models: `claude-haiku-4-5-20251001`, `claude-sonnet-4-5-20250929`, `claude-opus-4-6`. You can also switch models per stage in the UI at runtime.
+Available models: `claude-haiku-4-5-20251001`, `claude-sonnet-4-5-20250929`, `claude-opus-4-6`. Models are configurable per agent role via env vars or config file.
 
 ### Custom Ideation Methods
 

@@ -31,6 +31,14 @@ export function App() {
 
   useSSE(sessionId);
 
+  // Fetch model options from server (env-aware model versions)
+  const modelOptionsQuery = trpc.config.getModelOptions.useQuery();
+  useEffect(() => {
+    if (modelOptionsQuery.data) {
+      useSessionStore.getState().setModelOptions(modelOptionsQuery.data);
+    }
+  }, [modelOptionsQuery.data]);
+
   // Clear viewing state when the pipeline advances
   useEffect(() => {
     setViewingStage(null);

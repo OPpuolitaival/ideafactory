@@ -323,6 +323,185 @@ describe('config module', () => {
   });
 
   // -----------------------------------------------------------------------
+  // loadConfig with environment variables
+  // -----------------------------------------------------------------------
+
+  describe('loadConfig with environment variables', () => {
+    function cleanEnv() {
+      delete process.env.MODEL_DEFAULT;
+      delete process.env.MODEL_NAVIGATOR;
+      delete process.env.MODEL_STRATEGIST;
+      delete process.env.MODEL_WORKER;
+      delete process.env.MODEL_ANALYST;
+      delete process.env.HAIKU_MODEL;
+      delete process.env.SONNET_MODEL;
+      delete process.env.OPUS_MODEL;
+      delete process.env.PORT;
+      delete process.env.IDEAS_PER_WORKER;
+      delete process.env.WEB_SEARCH;
+    }
+
+    beforeEach(() => {
+      cleanEnv();
+      configModule.resetConfigCache();
+    });
+
+    it('reads model config from env vars', () => {
+      process.env.MODEL_NAVIGATOR = 'claude-haiku-4-5-20251001';
+      configModule.resetConfigCache();
+
+      const cfg = configModule.loadConfig();
+      expect(cfg.models.navigator).toBe('claude-haiku-4-5-20251001');
+      // Others should still be defaults
+      expect(cfg.models.strategist).toBe('claude-opus-4-6');
+    });
+
+    it('env vars override config.yaml values', () => {
+      const yamlContent = YAML.stringify({
+        models: { navigator: 'yaml-model' },
+      });
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, yamlContent);
+
+      process.env.MODEL_NAVIGATOR = 'env-model';
+      configModule.resetConfigCache();
+
+      const cfg = configModule.loadConfig();
+      expect(cfg.models.navigator).toBe('env-model');
+    });
+
+    it('falls back to yaml when env vars are absent', () => {
+      const yamlContent = YAML.stringify({
+        models: { navigator: 'yaml-model' },
+      });
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, yamlContent);
+
+      configModule.resetConfigCache();
+      const cfg = configModule.loadConfig();
+      expect(cfg.models.navigator).toBe('yaml-model');
+    });
+
+    it('empty string env vars treated as unset', () => {
+      process.env.MODEL_NAVIGATOR = '';
+      configModule.resetConfigCache();
+
+      const cfg = configModule.loadConfig();
+      expect(cfg.models.navigator).toBe('claude-opus-4-6'); // default
+    });
+
+    it('full resolution chain: env > yaml > defaults', () => {
+      const yamlContent = YAML.stringify({
+        models: {
+          navigator: 'yaml-nav',
+          strategist: 'yaml-strat',
+        },
+      });
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, yamlContent);
+
+      process.env.MODEL_NAVIGATOR = 'env-nav';
+      configModule.resetConfigCache();
+
+      const cfg = configModule.loadConfig();
+      expect(cfg.models.navigator).toBe('env-nav'); // env wins
+      expect(cfg.models.strategist).toBe('yaml-strat'); // yaml fallback
+      expect(cfg.models.worker).toBe('claude-opus-4-6'); // default fallback
+    });
+
+    it('reads PORT from env', () => {
+      process.env.PORT = '4000';
+      configModule.resetConfigCache();
+
+      const cfg = configModule.loadConfig();
+      expect(cfg.server.port).toBe(4000);
+    });
+
+    it('reads IDEAS_PER_WORKER from env', () => {
+      process.env.IDEAS_PER_WORKER = '20';
+      configModule.resetConfigCache();
+
+      const cfg = configModule.loadConfig();
+      expect(cfg.defaults.ideasPerWorker).toBe(20);
+    });
+
+    it('ignores IDEAS_PER_WORKER out of range', () => {
+      process.env.IDEAS_PER_WORKER = '999';
+      configModule.resetConfigCache();
+
+      const cfg = configModule.loadConfig();
+      expect(cfg.defaults.ideasPerWorker).toBe(15); // default
+    });
+
+    it('reads WEB_SEARCH from env', () => {
+      process.env.WEB_SEARCH = 'true';
+      configModule.resetConfigCache();
+
+      const cfg = configModule.loadConfig();
+      expect(cfg.defaults.webSearch).toBe(true);
+    });
+
+    it('reads MODEL_DEFAULT from env', () => {
+      process.env.MODEL_DEFAULT = 'custom-default';
+      configModule.resetConfigCache();
+
+      const cfg = configModule.loadConfig();
+      expect(cfg.models.default).toBe('custom-default');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // getModelOptions
+  // -----------------------------------------------------------------------
+
+  describe('getModelOptions', () => {
+    function cleanModelEnv() {
+      delete process.env.HAIKU_MODEL;
+      delete process.env.SONNET_MODEL;
+      delete process.env.OPUS_MODEL;
+    }
+
+    beforeEach(() => {
+      cleanModelEnv();
+    });
+
+    it('returns defaults when no env vars set', () => {
+      const options = configModule.getModelOptions();
+      expect(options).toHaveLength(3);
+      expect(options[0]).toEqual({ id: 'claude-haiku-4-5-20251001', label: 'Haiku', color: '#30a46c' });
+      expect(options[1]).toEqual({ id: 'claude-sonnet-4-5-20250929', label: 'Sonnet', color: '#3e63dd' });
+      expect(options[2]).toEqual({ id: 'claude-opus-4-6', label: 'Opus', color: '#f5a623' });
+    });
+
+    it('reads HAIKU_MODEL from env', () => {
+      process.env.HAIKU_MODEL = 'claude-haiku-5-0';
+      const options = configModule.getModelOptions();
+      expect(options[0].id).toBe('claude-haiku-5-0');
+      expect(options[0].label).toBe('Haiku');
+    });
+
+    it('reads SONNET_MODEL from env', () => {
+      process.env.SONNET_MODEL = 'claude-sonnet-5-0';
+      const options = configModule.getModelOptions();
+      expect(options[1].id).toBe('claude-sonnet-5-0');
+    });
+
+    it('reads OPUS_MODEL from env', () => {
+      process.env.OPUS_MODEL = 'claude-opus-5-0';
+      const options = configModule.getModelOptions();
+      expect(options[2].id).toBe('claude-opus-5-0');
+    });
+
+    it('handles partial overrides', () => {
+      process.env.SONNET_MODEL = 'custom-sonnet';
+      const options = configModule.getModelOptions();
+      expect(options[0].id).toBe('claude-haiku-4-5-20251001'); // unchanged
+      expect(options[1].id).toBe('custom-sonnet'); // overridden
+      expect(options[2].id).toBe('claude-opus-4-6'); // unchanged
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // getAllMethods
   // -----------------------------------------------------------------------
 

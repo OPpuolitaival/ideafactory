@@ -27,6 +27,7 @@
     "@ideafactory/shared": "workspace:*",
     "@trpc/server": "^11.9.0",
     "better-sqlite3": "^12.6.2",
+    "dotenv": "^16.4.5",
     "drizzle-orm": "^0.45.1",
     "hono": "^4.11.7",
     "nanoid": "^5.1.6",

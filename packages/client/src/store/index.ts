@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { STAGE_ORDER, STAGES } from '@ideafactory/shared';
+import { STAGE_ORDER, STAGES, MODEL_OPTIONS } from '@ideafactory/shared';
 import type { Stage, SessionModels, TaxonomyNode, Rubric, RawIdea, ScoredIdea, QAResult, IdeaPackage, SSEEvent } from '@ideafactory/shared';
 
 export interface ThoughtEntry {
@@ -26,7 +26,16 @@ export interface SessionData {
   eventLog: { type: string; data: any; createdAt?: number }[];
 }
 
+export interface ModelOption {
+  id: string;
+  label: string;
+  color: string;
+}
+
 interface SessionState {
+  // Model options (fetched from server, fallback to shared constants)
+  modelOptions: ModelOption[];
+
   // Current session
   sessionId: string | null;
   domain: string;
@@ -63,8 +72,7 @@ interface SessionState {
   combinedPool: ScoredIdea[];
   qaSheets: QAResult[];
   ideaPackages: IdeaPackage[];
-  qaInProgress: boolean;
-  packagingInProgress: boolean;
+  reviewInProgress: boolean;
 
   // Thought feed
   thoughts: ThoughtEntry[];
@@ -74,6 +82,7 @@ interface SessionState {
   sessionModels: SessionModels | null;
 
   // Actions
+  setModelOptions: (options: ModelOption[]) => void;
   setSessionId: (id: string | null) => void;
   setDomain: (domain: string) => void;
   setStage: (stage: Stage) => void;
@@ -102,6 +111,7 @@ interface SessionState {
 }
 
 const initialState = {
+  modelOptions: MODEL_OPTIONS.map((o) => ({ id: o.id, label: o.label, color: o.color })) as ModelOption[],
   sessionId: null,
   domain: '',
   stage: 'taxonomy' as Stage,
@@ -124,8 +134,7 @@ const initialState = {
   combinedPool: [] as ScoredIdea[],
   qaSheets: [] as QAResult[],
   ideaPackages: [] as IdeaPackage[],
-  qaInProgress: false,
-  packagingInProgress: false,
+  reviewInProgress: false,
   thoughts: [] as ThoughtEntry[],
   stageModels: {} as Record<string, string>,
   sessionModels: null as SessionModels | null,
@@ -134,6 +143,7 @@ const initialState = {
 export const useSessionStore = create<SessionState>((set, get) => ({
   ...initialState,
 
+  setModelOptions: (options) => set({ modelOptions: options }),
   setSessionId: (id) => set({ sessionId: id }),
   setDomain: (domain) => set({ domain }),
   setStage: (stage) => set({ stage }),
@@ -240,15 +250,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       updates.combinedPool = [];
       updates.qaSheets = [];
       updates.ideaPackages = [];
-      updates.qaInProgress = false;
-      updates.packagingInProgress = false;
+      updates.reviewInProgress = false;
     }
     // Rolling back TO factory clears QA/packaging (interactive sub-operations)
     if (stageIdx <= STAGE_ORDER.indexOf('factory')) {
       updates.qaSheets = [];
       updates.ideaPackages = [];
-      updates.qaInProgress = false;
-      updates.packagingInProgress = false;
+      updates.reviewInProgress = false;
     }
 
     // Clear downstream stageModels
@@ -439,7 +447,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         store.addIdeaPackage(event.data);
         break;
       case 'factory:progress':
-        set({ factoryProgress: event.data });
+        if (event.data.detail === 'Review complete') {
+          set({ reviewInProgress: false, factoryProgress: null });
+        } else {
+          set({ factoryProgress: event.data });
+        }
         break;
       case 'status:stage_complete': {
         set({ isLoading: false, factoryPhase: event.data.stage === 'factory' ? 'complete' : get().factoryPhase });
@@ -462,14 +474,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         store.addThought('system', `Starting ${event.data.stage} stage...`);
         break;
       case 'status:error':
-        set({ error: event.data.error, errorStage: event.data.stage, isLoading: false, factoryPhase: 'idle', factoryProgress: null, factoryStartedAt: null, qaInProgress: false, packagingInProgress: false });
+        set({ error: event.data.error, errorStage: event.data.stage, isLoading: false, factoryPhase: 'idle', factoryProgress: null, factoryStartedAt: null, reviewInProgress: false });
         break;
     }
   },
 
-  reset: () =>
+  reset: () => {
+    const { modelOptions } = get();
     set({
       ...initialState,
+      modelOptions,
       thoughts: [],
       stageModels: {},
       sessionModels: null,
@@ -477,5 +491,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       sseStatus: 'disconnected',
       factoryProgress: null,
       factoryStartedAt: null,
-    }),
+    });
+  },
 }));

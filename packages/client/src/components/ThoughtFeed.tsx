@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useSessionStore } from '../store/index.js';
-import { MODEL_OPTIONS } from '@ideafactory/shared';
+import type { ModelOption } from '../store/index.js';
 
-function getModelColor(model?: string): string {
-  const opt = MODEL_OPTIONS.find((m) => m.id === model);
+function getModelColor(modelOptions: ModelOption[], model?: string): string {
+  const opt = modelOptions.find((m) => m.id === model);
   return opt?.color ?? '#6e56cf';
 }
 
@@ -30,6 +30,7 @@ export function ThoughtFeed() {
   const thoughts = useSessionStore((s) => s.thoughts);
   const stageModels = useSessionStore((s) => s.stageModels);
   const sseStatus = useSessionStore((s) => s.sseStatus);
+  const modelOptions = useSessionStore((s) => s.modelOptions);
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoScroll = useRef(true);
   const [collapsed, setCollapsed] = useState(false);
@@ -115,7 +116,7 @@ export function ThoughtFeed() {
           )}
           {thoughts.map((t) => {
             if (t.stageCheckpoint) {
-              const checkpointColor = getModelColor(stageModels[t.stageCheckpoint]);
+              const checkpointColor = getModelColor(modelOptions, stageModels[t.stageCheckpoint]);
               return (
                 <div key={t.id} className="flex items-center gap-2 py-2 my-1">
                   <div className="flex-1 h-px" style={{ backgroundColor: `${checkpointColor}4D` }} />
@@ -124,7 +125,7 @@ export function ThoughtFeed() {
                 </div>
               );
             }
-            const color = getModelColor(t.model);
+            const color = getModelColor(modelOptions, t.model);
             return (
               <div key={t.id} className="flex gap-2 items-start">
                 <span className="text-gray-600 shrink-0">{formatTime(t.timestamp)}</span>

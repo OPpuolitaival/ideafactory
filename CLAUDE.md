@@ -86,8 +86,15 @@ Interactive operations (triggered by user, not automated):
 
 ### Configuration
 
-- `ANTHROPIC_API_KEY` env var or `~/.ideafactory/config.yaml` (`apiKey` field)
-- Config supports: `defaults.ideasPerWorker` (5-30), `defaults.webSearch` (bool), `models.*` per agent role, `server.port`
+Configuration is resolved in priority order: **session config > .env / env vars > config.yaml > defaults**.
+
+- **`.env`** at project root (loaded via `dotenv`): see `.env.example` for all supported vars
+  - `ANTHROPIC_API_KEY` — or use Claude Code session auth
+  - `MODEL_DEFAULT`, `MODEL_NAVIGATOR`, `MODEL_STRATEGIST`, `MODEL_WORKER`, `MODEL_ANALYST` — per-role model assignment
+  - `HAIKU_MODEL`, `SONNET_MODEL`, `OPUS_MODEL` — model version IDs for each tier (served to client for model selector)
+  - `PORT`, `IDEAS_PER_WORKER` (5-30), `WEB_SEARCH` (true/false)
+- **`~/.ideafactory/config.yaml`** — optional per-user config (same keys as env vars, YAML format)
+- **Defaults** in `packages/shared/src/constants.ts` (`DEFAULT_CONFIG`)
 - Custom methods: YAML/JSON in `~/.ideafactory/methods/`
 - Worker count is determined by the number of selected methods (one worker per method)
 

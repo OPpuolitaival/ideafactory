@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { trpc } from '../trpc/index.js';
 import { useSessionStore } from '../store/index.js';
 import { ModelSelector } from './ModelSelector.js';
-import { MODEL_OPTIONS } from '@ideafactory/shared';
 
 interface DashboardProps {
   onStartSession: () => void;
@@ -17,6 +16,7 @@ export function Dashboard({ onStartSession }: DashboardProps) {
   const deleteMutation = trpc.session.delete.useMutation();
   const duplicateMutation = trpc.session.duplicate.useMutation();
   const store = useSessionStore();
+  const modelOptions = useSessionStore((s) => s.modelOptions);
 
   const [models, setModels] = useState({
     navigator: 'claude-opus-4-6',
@@ -180,7 +180,7 @@ export function Dashboard({ onStartSession }: DashboardProps) {
                   {session.config?.models && (() => {
                     const sm = session.config.models;
                     const allSame = sm.navigator === sm.strategist && sm.strategist === sm.worker && sm.worker === sm.analyst;
-                    const opt = MODEL_OPTIONS.find((o) => o.id === sm.navigator);
+                    const opt = modelOptions.find((o) => o.id === sm.navigator);
                     return (
                       <span
                         className="badge"
