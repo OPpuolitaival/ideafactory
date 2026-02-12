@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSessionStore } from '../../store/index.js';
 import { trpc } from '../../trpc/index.js';
 import type { RawIdea, ScoredIdea, QAResult, IdeaPackage } from '@ideafactory/shared';
@@ -48,8 +48,7 @@ export function FactoryStage() {
     combinedPool,
     qaSheets,
     ideaPackages,
-    qaInProgress,
-    packagingInProgress,
+    reviewInProgress,
     sessionId,
     stage,
     isLoading,
@@ -144,8 +143,7 @@ export function FactoryStage() {
           scoredIdeas={scoredIdeas}
           qaSheets={qaSheets}
           ideaPackages={ideaPackages}
-          qaInProgress={qaInProgress}
-          packagingInProgress={packagingInProgress}
+          reviewInProgress={reviewInProgress}
           isCompleted={stage === 'completed' || factoryPhase === 'complete'}
         />
       )}
@@ -363,8 +361,7 @@ function InteractiveView({
   scoredIdeas,
   qaSheets,
   ideaPackages,
-  qaInProgress,
-  packagingInProgress,
+  reviewInProgress,
   isCompleted,
 }: {
   sessionId: string | null;
@@ -372,23 +369,35 @@ function InteractiveView({
   scoredIdeas: ScoredIdea[];
   qaSheets: QAResult[];
   ideaPackages: IdeaPackage[];
-  qaInProgress: boolean;
-  packagingInProgress: boolean;
+  reviewInProgress: boolean;
   isCompleted: boolean;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showEliminated, setShowEliminated] = useState(false);
   const store = useSessionStore();
+  const factoryProgress = useSessionStore((s) => s.factoryProgress);
 
-  const runQAMutation = trpc.session.runQA.useMutation();
-  const packageMutation = trpc.session.packageIdeas.useMutation();
+  const reviewMutation = trpc.session.runCriticalReview.useMutation();
   const completeMutation = trpc.session.completeSession.useMutation();
 
-  const qaSheetMap = new Map(qaSheets.map((s) => [s.conceptId, s]));
-  const pkgMap = new Map(ideaPackages.map((p) => [p.ideaId, p]));
+  const qaSheetMap = useMemo(() => new Map(qaSheets.map((s) => [s.conceptId, s])), [qaSheets]);
+  const pkgMap = useMemo(() => new Map(ideaPackages.map((p) => [p.ideaId, p])), [ideaPackages]);
 
-  const sorted = [...combinedPool].sort((a, b) => b.totalScore - a.totalScore);
+  // Merge pool + eliminated into a single lookup for names/descriptions
+  const allIdeasMap = useMemo(() => {
+    const map = new Map<string, ScoredIdea>();
+    for (const idea of combinedPool) map.set(idea.id, idea);
+    for (const idea of scoredIdeas) if (!map.has(idea.id)) map.set(idea.id, idea);
+    return map;
+  }, [combinedPool, scoredIdeas]);
+
+  const sorted = useMemo(
+    () => [...combinedPool].sort((a, b) => b.totalScore - a.totalScore),
+    [combinedPool],
+  );
+
+  const eliminated = useMemo(() => scoredIdeas.filter((i) => i.eliminated), [scoredIdeas]);
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -409,39 +418,19 @@ function InteractiveView({
     });
   };
 
-  const eliminated = scoredIdeas.filter((i) => i.eliminated);
-
-  const allSelectedHaveQA =
-    selected.size > 0 && Array.from(selected).every((id) => qaSheetMap.has(id));
-
-  const handleRunQA = async () => {
+  const handleRunReview = async () => {
     if (!sessionId || selected.size === 0) return;
     store.setError(null);
-    useSessionStore.setState({ qaInProgress: true });
+    useSessionStore.setState({ reviewInProgress: true });
     try {
-      await runQAMutation.mutateAsync({
+      await reviewMutation.mutateAsync({
         sessionId,
         ideaIds: Array.from(selected),
       });
-    } finally {
-      useSessionStore.setState({ qaInProgress: false });
+    } catch {
+      useSessionStore.setState({ reviewInProgress: false });
     }
-    // Keep selection — user can now click "Package Selected"
-  };
-
-  const handlePackage = async () => {
-    if (!sessionId || selected.size === 0) return;
-    store.setError(null);
-    useSessionStore.setState({ packagingInProgress: true });
-    try {
-      await packageMutation.mutateAsync({
-        sessionId,
-        ideaIds: Array.from(selected),
-      });
-      setSelected(new Set());
-    } finally {
-      useSessionStore.setState({ packagingInProgress: false });
-    }
+    // reviewInProgress will be cleared when all packages arrive or on error
   };
 
   const handleComplete = async () => {
@@ -464,20 +453,26 @@ function InteractiveView({
     await navigator.clipboard.writeText(pkg.deepResearchPrompt);
   };
 
+  // Build reviewed ideas: ideas that have a QA sheet (and optionally a package)
+  const reviewedIdeas = useMemo(() => {
+    return qaSheets.map((qa) => ({
+      qa,
+      idea: allIdeasMap.get(qa.conceptId),
+      pkg: pkgMap.get(qa.conceptId),
+    }));
+  }, [qaSheets, allIdeasMap, pkgMap]);
+
   return (
     <div className="space-y-8">
-      {/* QA Results */}
-      {qaSheets.length > 0 && (
+      {/* Critical Reviews */}
+      {reviewedIdeas.length > 0 && (
         <section>
-          <h3 className="text-lg font-semibold mb-4">QA Results</h3>
+          <h3 className="text-lg font-semibold mb-4">Critical Reviews</h3>
           <div className="space-y-3">
-            {qaSheets.map((qa) => (
+            {reviewedIdeas.map(({ qa, idea, pkg }) => (
               <div key={qa.conceptId} className="card">
                 <div className="flex items-start justify-between mb-3">
-                  <h4 className="font-medium">
-                    {combinedPool.find((i) => i.id === qa.conceptId)?.name ??
-                      qa.conceptId}
-                  </h4>
+                  <h4 className="font-medium">{idea?.name ?? qa.conceptId}</h4>
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-gray-400">
                       Feasibility: {qa.feasibilityScore}/5
@@ -495,59 +490,44 @@ function InteractiveView({
                     </span>
                   </div>
                 </div>
+                {idea && (
+                  <p className="text-sm text-gray-300 mb-3">{idea.description}</p>
+                )}
                 <p className="text-sm text-gray-400 mb-3">{qa.summary}</p>
-                <div className="space-y-1">
-                  {qa.risks.map((risk, i) => (
-                    <div key={i} className="flex items-start gap-2 text-xs">
-                      <span
-                        className={`badge ${
-                          risk.severity === 'critical'
-                            ? 'bg-danger/20 text-danger'
-                            : risk.severity === 'high'
-                              ? 'bg-danger/10 text-danger/80'
-                              : risk.severity === 'medium'
-                                ? 'bg-warning/20 text-warning'
-                                : 'bg-gray-500/20 text-gray-400'
-                        }`}
-                      >
-                        {risk.severity}
-                      </span>
-                      <span className="text-gray-400">
-                        <strong>{risk.category}:</strong> {risk.description}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Packaged Ideas */}
-      {ideaPackages.length > 0 && (
-        <section>
-          <h3 className="text-lg font-semibold mb-4">Packaged Ideas</h3>
-          <div className="space-y-3">
-            {ideaPackages.map((pkg) => (
-              <div key={pkg.ideaId} className="card border-accent/20">
-                <div className="flex items-start justify-between">
-                  <h4 className="font-medium">{pkg.ideaName}</h4>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => downloadHTML(pkg)}
-                      className="btn-ghost text-xs"
-                    >
+                {qa.risks.length > 0 && (
+                  <div className="space-y-1 mb-3">
+                    {qa.risks.map((risk, i) => (
+                      <div key={i} className="flex items-start gap-2 text-xs">
+                        <span
+                          className={`badge ${
+                            risk.severity === 'critical'
+                              ? 'bg-danger/20 text-danger'
+                              : risk.severity === 'high'
+                                ? 'bg-danger/10 text-danger/80'
+                                : risk.severity === 'medium'
+                                  ? 'bg-warning/20 text-warning'
+                                  : 'bg-gray-500/20 text-gray-400'
+                          }`}
+                        >
+                          {risk.severity}
+                        </span>
+                        <span className="text-gray-400">
+                          <strong>{risk.category}:</strong> {risk.description}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {pkg && (
+                  <div className="flex items-center gap-2 pt-2 border-t border-bg-3">
+                    <button onClick={() => downloadHTML(pkg)} className="btn-ghost text-xs">
                       Download HTML
                     </button>
-                    <button
-                      onClick={() => copyPrompt(pkg)}
-                      className="btn-ghost text-xs"
-                    >
+                    <button onClick={() => copyPrompt(pkg)} className="btn-ghost text-xs">
                       Copy Prompt
                     </button>
                   </div>
-                </div>
+                )}
               </div>
             ))}
           </div>
@@ -558,29 +538,23 @@ function InteractiveView({
       <section>
         <h3 className="text-lg font-semibold mb-2">Idea Pool</h3>
         <p className="text-sm text-gray-400 mb-4">
-          Click ideas to select them, then run QA or package.
+          Select ideas, then run Critical Review to analyze feasibility and generate reports.
         </p>
 
         {!isCompleted && (
           <div className="flex items-center gap-3 mb-4">
             <button
-              onClick={handleRunQA}
-              disabled={selected.size === 0 || qaInProgress || runQAMutation.isPending}
+              onClick={handleRunReview}
+              disabled={selected.size === 0 || reviewInProgress || reviewMutation.isPending}
               className="btn-primary text-sm"
             >
-              {qaInProgress ? 'Running QA...' : `Run QA on Selected (${selected.size})`}
+              {reviewInProgress
+                ? 'Reviewing...'
+                : `Run Critical Review (${selected.size})`}
             </button>
-            <button
-              onClick={handlePackage}
-              disabled={
-                !allSelectedHaveQA || packagingInProgress || packageMutation.isPending
-              }
-              className="btn-secondary text-sm"
-            >
-              {packagingInProgress
-                ? 'Packaging...'
-                : `Package Selected (${selected.size})`}
-            </button>
+            {reviewInProgress && factoryProgress && (
+              <span className="text-sm text-accent-light">{factoryProgress.detail}</span>
+            )}
           </div>
         )}
 
@@ -622,7 +596,7 @@ function InteractiveView({
                     </h4>
                     {hasQA && (
                       <span className="badge bg-success/20 text-success text-xs shrink-0">
-                        QA'd
+                        Reviewed
                       </span>
                     )}
                     {hasPkg && (
@@ -644,7 +618,7 @@ function InteractiveView({
         </div>
       </section>
 
-      {/* Eliminated Ideas */}
+      {/* Eliminated Ideas — selectable for critical review */}
       {eliminated.length > 0 && (
         <section>
           <button
@@ -657,9 +631,27 @@ function InteractiveView({
           {showEliminated && (
             <div className="space-y-2 mt-3">
               {eliminated.map((idea) => {
+                const isSelected = selected.has(idea.id);
                 const isExpanded = expanded.has(idea.id);
+                const hasQA = qaSheetMap.has(idea.id);
+                const hasPkg = pkgMap.has(idea.id);
                 return (
-                  <div key={idea.id} className="card opacity-50 flex items-center gap-4">
+                  <div
+                    key={idea.id}
+                    onClick={() => !isCompleted && toggleSelect(idea.id)}
+                    className={`card flex items-center gap-4 ${
+                      !isCompleted ? 'cursor-pointer' : ''
+                    } ${isSelected ? 'border-accent/50 bg-accent/5' : 'opacity-50'}`}
+                  >
+                    {!isCompleted && (
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelect(idea.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="accent-accent shrink-0"
+                      />
+                    )}
                     <button
                       onClick={(e) => toggleExpanded(idea.id, e)}
                       className="text-gray-500 hover:text-gray-300 text-base shrink-0 p-1"
@@ -668,9 +660,21 @@ function InteractiveView({
                       {isExpanded ? '\u25BE' : '\u25B8'}
                     </button>
                     <div className="flex-1 min-w-0">
-                      <h4 className={`font-medium ${isExpanded ? '' : 'truncate'}`}>
-                        {idea.name}
-                      </h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className={`font-medium ${isExpanded ? '' : 'truncate'}`}>
+                          {idea.name}
+                        </h4>
+                        {hasQA && (
+                          <span className="badge bg-success/20 text-success text-xs shrink-0">
+                            Reviewed
+                          </span>
+                        )}
+                        {hasPkg && (
+                          <span className="badge bg-accent/20 text-accent text-xs shrink-0">
+                            Packaged
+                          </span>
+                        )}
+                      </div>
                       <p className={`text-sm text-gray-400 ${isExpanded ? '' : 'truncate'}`}>
                         {idea.description}
                       </p>

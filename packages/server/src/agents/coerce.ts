@@ -16,7 +16,6 @@ const ARRAY_FIELDS = new Set([
   'risks',
   'gates',
   'criteria',
-  'tests',
   'recommended',
   'children',
 ]);

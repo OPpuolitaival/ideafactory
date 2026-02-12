@@ -16,7 +16,6 @@ const taxonomyNode: TaxonomyNode = {
 const rubric: Rubric = {
   gates: [{ id: 'g1', text: 'Gate 1' }],
   criteria: [{ id: 'c1', text: 'Criterion 1', weight: 3, description: 'desc' }],
-  tests: [{ id: 't1', text: 'Test 1' }],
 };
 
 const rawIdea: RawIdea = {
@@ -121,8 +120,7 @@ beforeEach(() => {
     combinedPool: [],
     qaSheets: [],
     ideaPackages: [],
-    qaInProgress: false,
-    packagingInProgress: false,
+    reviewInProgress: false,
     thoughts: [],
     stageModels: {},
     sessionModels: null,
@@ -533,8 +531,8 @@ describe('handleSSEEvent', () => {
     expect(state.combinedPool).toEqual([scoredIdea, evolvedIdea]);
   });
 
-  it('data:qa_sheet appends to qaSheets without clearing qaInProgress', () => {
-    useSessionStore.setState({ qaInProgress: true });
+  it('data:qa_sheet appends to qaSheets without clearing reviewInProgress', () => {
+    useSessionStore.setState({ reviewInProgress: true });
     const event: SSEEvent = {
       type: 'data:qa_sheet',
       data: qaResult,
@@ -543,11 +541,11 @@ describe('handleSSEEvent', () => {
 
     const state = useSessionStore.getState();
     expect(state.qaSheets).toEqual([qaResult]);
-    expect(state.qaInProgress).toBe(true);
+    expect(state.reviewInProgress).toBe(true);
   });
 
-  it('data:idea_package appends to ideaPackages without clearing packagingInProgress', () => {
-    useSessionStore.setState({ packagingInProgress: true });
+  it('data:idea_package appends to ideaPackages without clearing reviewInProgress', () => {
+    useSessionStore.setState({ reviewInProgress: true });
     const event: SSEEvent = {
       type: 'data:idea_package',
       data: ideaPackage,
@@ -556,7 +554,7 @@ describe('handleSSEEvent', () => {
 
     const state = useSessionStore.getState();
     expect(state.ideaPackages).toEqual([ideaPackage]);
-    expect(state.packagingInProgress).toBe(true);
+    expect(state.reviewInProgress).toBe(true);
   });
 
   it('factory:progress sets factoryProgress', () => {
@@ -749,8 +747,7 @@ describe('reset', () => {
       combinedPool: [scoredIdea],
       qaSheets: [qaResult],
       ideaPackages: [ideaPackage],
-      qaInProgress: true,
-      packagingInProgress: true,
+      reviewInProgress: true,
     });
     useSessionStore.getState().addThought('test', 'Should be cleared');
 
@@ -779,8 +776,7 @@ describe('reset', () => {
     expect(state.combinedPool).toEqual([]);
     expect(state.qaSheets).toEqual([]);
     expect(state.ideaPackages).toEqual([]);
-    expect(state.qaInProgress).toBe(false);
-    expect(state.packagingInProgress).toBe(false);
+    expect(state.reviewInProgress).toBe(false);
     expect(state.thoughts).toEqual([]);
     expect(state.stageModels).toEqual({});
     expect(state.sessionModels).toBeNull();

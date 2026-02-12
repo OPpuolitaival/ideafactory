@@ -63,8 +63,7 @@ taxonomy → methods → rubric → factory → completed
 The Factory stage has automated sub-phases: **Diverge** (one worker per selected method, on-the-fly personas from method fields, temp=0.9) → **Converge** (batched scoring in groups of 5, gate filtering + top-N selection, temp=0.5) → **Evolve** (pair-based cross-pollination with re-scoring, returns survivors + evolved combined, temp=0.7) → **Interactive** (user selects ideas for QA and packaging via tRPC mutations).
 
 Interactive operations (triggered by user, not automated):
-- **QA** (`session.runQA`): parallel per-idea feasibility/risk agents → `qa_sheets` table
-- **Packaging** (`session.packageIdeas`): per-idea HTML artifact + deep research prompt → `idea_packages` table
+- **Critical Review** (`session.runCriticalReview`): chains QA (parallel per-idea feasibility/risk agents → `qa_sheets`) then packaging (per-idea HTML artifact + deep research prompt → `idea_packages`) server-side
 - **Complete** (`session.completeSession`): marks session as completed
 
 ### Agent System

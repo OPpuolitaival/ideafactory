@@ -139,16 +139,12 @@ You MUST return a JSON object with exactly this structure:
   "criteria": [
     { "id": "c1", "text": "Feasibility", "weight": 4, "description": "1=impossible; 5=trivial to build" },
     { "id": "c2", "text": "Novelty", "weight": 3, "description": "1=already exists; 5=never been done" }
-  ],
-  "tests": [
-    { "id": "t1", "text": "Build a prototype and test with 5 users" }
   ]
 }
 
 Requirements:
 - "gates": array of 3-5 objects, each with "id" (string like "g1") and "text" (string)
 - "criteria": array of 5-8 objects, each with "id" (string like "c1"), "text" (string), "weight" (integer 1-5), and "description" (string explaining 1 vs 5)
-- "tests": array of 3-5 objects, each with "id" (string like "t1") and "text" (string)
 
 Return ONLY the JSON object. No markdown, no code blocks, no extra text.`,
       outputSchema: rubricJsonSchema,

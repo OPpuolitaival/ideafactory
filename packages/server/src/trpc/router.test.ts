@@ -373,13 +373,12 @@ describe('session router', () => {
       await seedSession(db, { id: 'adv-rub', status: 'rubric' });
       await db.insert(schema.rubrics).values({
         sessionId: 'adv-rub',
-        rubric: JSON.stringify({ gates: [], criteria: [], tests: [] }),
+        rubric: JSON.stringify({ gates: [], criteria: [] }),
       });
 
       const updatedRubric = {
         gates: [{ id: 'g1', text: 'Must be safe' }],
         criteria: [{ id: 'c1', text: 'Novelty', weight: 4, description: 'How novel' }],
-        tests: [{ id: 't1', text: 'Drop test' }],
       };
 
       await caller.session.advance({
@@ -422,7 +421,7 @@ describe('session router', () => {
       });
       await db.insert(schema.rubrics).values({
         sessionId: 'del-cas',
-        rubric: JSON.stringify({ gates: [], criteria: [], tests: [] }),
+        rubric: JSON.stringify({ gates: [], criteria: [] }),
       });
 
       await caller.session.delete({ id: 'del-cas' });
@@ -453,7 +452,6 @@ describe('session router', () => {
     const validRubric = {
       gates: [{ id: 'g1', text: 'Must be safe' }],
       criteria: [{ id: 'c1', text: 'Novelty', weight: 3, description: 'How novel is the idea' }],
-      tests: [{ id: 't1', text: 'User testing' }],
     };
 
     it('creates a new rubric when none exists', async () => {
@@ -477,7 +475,7 @@ describe('session router', () => {
       await seedSession(db, { id: 'rub-upd' });
       await db.insert(schema.rubrics).values({
         sessionId: 'rub-upd',
-        rubric: JSON.stringify({ gates: [], criteria: [], tests: [] }),
+        rubric: JSON.stringify({ gates: [], criteria: [] }),
       });
 
       await caller.session.updateRubric({
@@ -501,7 +499,6 @@ describe('session router', () => {
           rubric: {
             gates: [{ id: 'g1', text: 'ok' }],
             criteria: [{ id: 'c1' }], // missing text, weight, description
-            tests: [],
           } as any,
         }),
       ).rejects.toThrow();
@@ -516,7 +513,6 @@ describe('session router', () => {
           rubric: {
             gates: [],
             criteria: [{ id: 'c1', text: 'x', weight: 10, description: 'too heavy' }],
-            tests: [],
           },
         }),
       ).rejects.toThrow();
@@ -684,7 +680,7 @@ describe('session router', () => {
       });
       await db.insert(schema.rubrics).values({
         sessionId: id,
-        rubric: JSON.stringify({ gates: [], criteria: [], tests: [] }),
+        rubric: JSON.stringify({ gates: [], criteria: [] }),
       });
       await db.insert(schema.ideas).values({
         id: `${id}-idea`,

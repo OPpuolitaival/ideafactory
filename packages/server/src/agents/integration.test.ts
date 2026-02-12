@@ -143,11 +143,6 @@ const rubric = {
     { id: 'c4', text: 'User Delight', weight: 4, description: 'Will users love it?' },
     { id: 'c5', text: 'Scalability', weight: 3, description: 'Can it scale to many cities?' },
   ],
-  tests: [
-    { id: 't1', text: 'Explainable in one sentence?' },
-    { id: 't2', text: 'Defensible against Uber/Lyft?' },
-    { id: 't3', text: 'Positive cost-benefit within 3 years?' },
-  ],
 };
 
 // Stage 4a: Divergence – Worker 0 ideas (2 ideas, First Principles method)
@@ -403,7 +398,6 @@ describe('Integration – Full Pipeline end-to-end', () => {
     const stored = JSON.parse(rubricRow.rubric);
     expect(stored.gates).toHaveLength(3);
     expect(stored.criteria).toHaveLength(5);
-    expect(stored.tests).toHaveLength(3);
   });
 
   // -----------------------------------------------------------------------

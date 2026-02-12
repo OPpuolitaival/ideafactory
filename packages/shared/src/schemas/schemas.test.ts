@@ -203,7 +203,6 @@ describe('RubricSchema', () => {
     criteria: [
       { id: 'c1', text: 'Novelty', weight: 3, description: 'How novel' },
     ],
-    tests: [{ id: 't1', text: 'User delight test' }],
   };
 
   it('accepts a valid rubric', () => {
@@ -255,12 +254,6 @@ describe('RubricSchema', () => {
 
   it('accepts empty criteria array', () => {
     const rubric = { ...validRubric, criteria: [] };
-    const result = RubricSchema.safeParse(rubric);
-    expect(result.success).toBe(true);
-  });
-
-  it('accepts empty tests array', () => {
-    const rubric = { ...validRubric, tests: [] };
     const result = RubricSchema.safeParse(rubric);
     expect(result.success).toBe(true);
   });

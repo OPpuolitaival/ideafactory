@@ -2,7 +2,9 @@
 
 An AI-powered ideation pipeline that uses Claude to generate, evaluate, evolve, and package creative ideas. Built as a web application with a real-time streaming UI.
 
-IdeaFactory runs a structured multi-stage pipeline — from domain exploration through taxonomy mapping, method selection, rubric design, and a multi-phase idea factory — producing scored, QA'd, and packaged idea artifacts you can act on.
+IdeaFactory runs a structured multi-stage pipeline — from domain exploration through taxonomy mapping, method selection, rubric design, and a multi-phase idea factory — producing scored, reviewed, and packaged idea artifacts you can act on.
+
+> **Note:** This software is experimental and may contain bugs. Not all features are fully tested. It is designed to run on localhost and is not optimized or secured for public-facing deployment. The purpose is to let you use your Claude subscription to produce ideas that are stored locally on your computer.
 
 ## How It Works
 
@@ -14,13 +16,12 @@ IdeaFactory uses the [Claude Agent SDK](https://docs.anthropic.com/en/docs/claud
 |---|-------|-------------|
 | 1 | **Taxonomy** | Explores your domain and builds a navigable taxonomy tree. You select a focus branch. |
 | 2 | **Methods** | Recommends ideation methods (First Principles, Biomimicry, TRIZ, etc.) tailored to your domain. You pick which to use. |
-| 3 | **Rubric** | Designs a scoring rubric with weighted criteria specific to your problem space. |
+| 3 | **Rubric** | Designs a scoring rubric with gates and weighted criteria specific to your problem space. |
 | 4 | **Factory** | Runs 3 automated sub-phases, then hands control to you: |
 | | — Diverge | One worker per method generates ideas in parallel (default 15 ideas each) |
 | | — Converge | Batched scoring against the rubric, gate filtering + top-N selection |
 | | — Evolve | Cross-pollinates surviving ideas in pairs, re-scores evolved variants |
-| | — Interactive | You select ideas from the combined pool for QA and packaging |
-| 5 | **QA & Packaging** | Per-idea feasibility analysis, risk assessment, HTML artifact generation, and deep-research prompts |
+| | — Interactive | You select ideas (including eliminated ones) and run **Critical Review** — a chained QA + packaging operation that produces feasibility analysis, risk assessment, HTML artifacts, and deep-research prompts |
 
 Each stage streams real-time progress via SSE — you see agent thoughts, token counts, and results as they arrive.
 
@@ -80,7 +81,7 @@ Since IdeaFactory uses the Agent SDK, the recommended workflow is:
 4. Open `http://localhost:5173` in your browser
 5. Create a session by entering a domain (e.g., "sustainable packaging", "developer tools")
 
-The server will make LLM calls through the Agent SDK, which routes through your Claude Code subscription. All models (Haiku, Sonnet, Opus) are available — you can switch models per stage in the UI.
+The server will make LLM calls through the Agent SDK, which routes through your Claude Code subscription. All models (Haiku, Sonnet, Opus) are available — configure them per agent role in `~/.ideafactory/config.yaml`.
 
 ## Architecture
 
@@ -97,7 +98,7 @@ pnpm monorepo with three packages:
 
 ### Communication
 
-- **tRPC** (`/trpc/*`) — Client-server RPC for mutations (start session, advance stage, run QA) and queries
+- **tRPC** (`/trpc/*`) — Client-server RPC for mutations (start session, advance stage, run critical review) and queries
 - **SSE** (`/api/session/:id/stream`) — Server-to-client real-time events during pipeline execution
 
 ### Data Storage
@@ -158,13 +159,23 @@ pnpm run --filter server cli -- run \
   --auto-accept-rubric \
   --output json
 
+# Run a single stage (for testing)
+pnpm run --filter server cli -- stage taxonomy
+
 # Session management
 pnpm run --filter server cli -- sessions list
 pnpm run --filter server cli -- sessions get <session-id>
+pnpm run --filter server cli -- sessions copy <session-id> --rollback-to <stage>
+pnpm run --filter server cli -- sessions delete <session-id>
+pnpm run --filter server cli -- sessions rollback <session-id> --to <stage>
 pnpm run --filter server cli -- export <session-id>
 
 # Configuration
 pnpm run --filter server cli -- config show
+pnpm run --filter server cli -- config set <key> <value>
+
+# Start the web server (without dev mode)
+pnpm run --filter server cli -- server
 ```
 
 ## Development
@@ -196,8 +207,11 @@ packages/
 │   │   ├── factory.ts      # Factory orchestrator (diverge/converge/evolve/interactive)
 │   │   ├── qa.ts           # Per-idea QA agent
 │   │   ├── packaging.ts    # HTML artifact + research prompt generation
-│   │   └── pipeline.ts     # Pipeline orchestrator
-│   ├── skills/             # Markdown system prompts for each agent role
+│   │   ├── pipeline.ts     # Pipeline orchestrator
+│   │   ├── coerce.ts       # JSON coercion for LLM response type mismatches
+│   │   ├── registry.ts     # Pipeline abort/tracking registry
+│   │   └── schemas.ts      # Agent-specific Zod schemas
+│   ├── skills/             # Markdown system prompts for each agent role (subdirectories)
 │   ├── trpc/               # tRPC router, context, procedures
 │   ├── sse/                # SSE pub/sub manager with persistence
 │   ├── db/                 # Drizzle ORM schema + SQLite setup

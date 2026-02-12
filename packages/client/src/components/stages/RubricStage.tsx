@@ -64,24 +64,6 @@ export function RubricStage({ readOnly }: { readOnly?: boolean } = {}) {
     });
   };
 
-  const updateTestText = (index: number, text: string) => {
-    if (!rubric) return;
-    setRubric({ ...rubric, tests: rubric.tests.map((t, i) => (i === index ? { ...t, text } : t)) });
-  };
-
-  const deleteTest = (index: number) => {
-    if (!rubric) return;
-    setRubric({ ...rubric, tests: rubric.tests.filter((_, i) => i !== index) });
-  };
-
-  const addTest = () => {
-    if (!rubric) return;
-    setRubric({
-      ...rubric,
-      tests: [...rubric.tests, { id: `t${rubric.tests.length + 1}`, text: '' }],
-    });
-  };
-
   if (isLoading && !rubric) {
     return (
       <div className="max-w-4xl mx-auto">
@@ -192,37 +174,6 @@ export function RubricStage({ readOnly }: { readOnly?: boolean } = {}) {
           {!readOnly && (
             <button onClick={addCriterion} className="btn-ghost text-sm">
               + Add Criterion
-            </button>
-          )}
-        </div>
-      </section>
-
-      {/* Verification Tests */}
-      <section className="mb-8">
-        <h3 className="text-lg font-semibold mb-3 text-info">Verification Tests</h3>
-        <div className="space-y-2">
-          {rubric.tests.map((test, i) => (
-            <div key={test.id} className="flex items-center gap-2">
-              {readOnly ? (
-                <span className="flex-1 text-sm text-gray-300">{test.text}</span>
-              ) : (
-                <>
-                  <input
-                    type="text"
-                    value={test.text}
-                    onChange={(e) => updateTestText(i, e.target.value)}
-                    className="input flex-1"
-                  />
-                  <button onClick={() => deleteTest(i)} className="btn-ghost text-danger text-sm">
-                    ✕
-                  </button>
-                </>
-              )}
-            </div>
-          ))}
-          {!readOnly && (
-            <button onClick={addTest} className="btn-ghost text-sm">
-              + Add Test
             </button>
           )}
         </div>

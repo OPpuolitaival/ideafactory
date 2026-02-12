@@ -540,7 +540,7 @@ const sessionRouter = router({
       return detectFactoryProgress(input.sessionId);
     }),
 
-  runQA: publicProcedure
+  runCriticalReview: publicProcedure
     .input(z.object({ sessionId: z.string(), ideaIds: z.array(z.string()) }))
     .mutation(async ({ ctx, input }) => {
       const [session] = await ctx.db
@@ -563,63 +563,42 @@ const sessionRouter = router({
       const config = loadConfig();
       const model = sessionConfig.models?.analyst ?? config.models.analyst;
 
-      const controller = pipelineRegistry.register(`${input.sessionId}:qa`);
+      const controller = pipelineRegistry.register(`${input.sessionId}:review`);
 
-      // Fire-and-forget
-      runQAForIdeas({
-        sessionId: input.sessionId,
-        ideaIds: input.ideaIds,
-        rubric,
-        model,
-        signal: controller.signal,
-      }).catch((err) => {
+      // Fire-and-forget: QA then packaging sequentially
+      (async () => {
+        await runQAForIdeas({
+          sessionId: input.sessionId,
+          ideaIds: input.ideaIds,
+          rubric,
+          model,
+          signal: controller.signal,
+        });
+        await packageIdeas({
+          sessionId: input.sessionId,
+          ideaIds: input.ideaIds,
+          domain: session.domain,
+          coordinate: session.coordinate ?? '',
+          model,
+          signal: controller.signal,
+        });
+        // Signal review completion to the client
+        sseManager.emit(input.sessionId, {
+          type: 'factory:progress',
+          data: { phase: 'packaging', detail: 'Review complete' },
+        });
+      })().catch((err) => {
         if (err instanceof Error && err.name === 'AbortError') return;
-        console.error(`QA error for session ${input.sessionId}:`, err);
+        console.error(`Critical review error for session ${input.sessionId}:`, err);
         sseManager.emit(input.sessionId, {
           type: 'status:error',
-          data: { stage: 'factory', error: err instanceof Error ? err.message : 'QA failed' },
+          data: {
+            stage: 'factory',
+            error: err instanceof Error ? err.message : 'Critical review failed',
+          },
         });
       }).finally(() => {
-        pipelineRegistry.complete(`${input.sessionId}:qa`);
-      });
-
-      return { success: true };
-    }),
-
-  packageIdeas: publicProcedure
-    .input(z.object({ sessionId: z.string(), ideaIds: z.array(z.string()) }))
-    .mutation(async ({ ctx, input }) => {
-      const [session] = await ctx.db
-        .select()
-        .from(schema.sessions)
-        .where(eq(schema.sessions.id, input.sessionId));
-
-      if (!session) throw new Error('Session not found');
-      if (session.status !== 'factory') throw new Error('Session must be in factory stage');
-
-      const sessionConfig = session.config ? JSON.parse(session.config) : {};
-      const config = loadConfig();
-      const model = sessionConfig.models?.analyst ?? config.models.analyst;
-
-      const controller = pipelineRegistry.register(`${input.sessionId}:package`);
-
-      // Fire-and-forget
-      packageIdeas({
-        sessionId: input.sessionId,
-        ideaIds: input.ideaIds,
-        domain: session.domain,
-        coordinate: session.coordinate ?? '',
-        model,
-        signal: controller.signal,
-      }).catch((err) => {
-        if (err instanceof Error && err.name === 'AbortError') return;
-        console.error(`Packaging error for session ${input.sessionId}:`, err);
-        sseManager.emit(input.sessionId, {
-          type: 'status:error',
-          data: { stage: 'factory', error: err instanceof Error ? err.message : 'Packaging failed' },
-        });
-      }).finally(() => {
-        pipelineRegistry.complete(`${input.sessionId}:package`);
+        pipelineRegistry.complete(`${input.sessionId}:review`);
       });
 
       return { success: true };

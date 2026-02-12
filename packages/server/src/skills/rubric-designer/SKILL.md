@@ -33,15 +33,6 @@ Each criterion needs:
 - `weight`: 1-5 importance weight
 - `description`: 1-2 sentences explaining what a score of 1 vs 5 looks like
 
-### 3. Verification Tests (3-5)
-Methods to validate claims made by ideas. These aren't pass/fail - they're instructions for how to reality-check an idea.
-
-Good tests are:
-- Actionable and specific
-- Cover different risk dimensions (technical, market, user, cost)
-
-Examples: "Build a cardboard prototype and test with 5 users", "Calculate unit economics at 10K and 100K scale"
-
 ## Output Format
 
 ```json
@@ -56,9 +47,6 @@ Examples: "Build a cardboard prototype and test with 5 users", "Calculate unit e
       "weight": 4,
       "description": "1 = requires breakthrough technology; 5 = can be made with existing tooling"
     }
-  ],
-  "tests": [
-    { "id": "t1", "text": "Build a scale model and test structural integrity under load" }
   ]
 }
 ```

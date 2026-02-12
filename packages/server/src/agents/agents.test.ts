@@ -989,11 +989,6 @@ describe('Strategist – runRubricDesign', () => {
       { id: 'c4', text: 'Delight', weight: 4, description: 'User joy factor' },
       { id: 'c5', text: 'Scalability', weight: 3, description: 'Can it scale?' },
     ],
-    tests: [
-      { id: 't1', text: 'Can a user explain it in one sentence?' },
-      { id: 't2', text: 'Would a competitor struggle to copy it?' },
-      { id: 't3', text: 'Does it pass a basic cost-benefit analysis?' },
-    ],
   };
 
   const methods = [
@@ -1030,14 +1025,13 @@ describe('Strategist – runRubricDesign', () => {
     const stored = JSON.parse(row.rubric);
     expect(stored.gates).toHaveLength(3);
     expect(stored.criteria).toHaveLength(5);
-    expect(stored.tests).toHaveLength(3);
   });
 
   it('validates rubric structure against RubricSchema', async () => {
     await insertSession(testDb, 'sess-rubric-bad');
     // Missing gates
     mockQuery.mockReturnValue(
-      queryResult(JSON.stringify({ criteria: [], tests: [] })),
+      queryResult(JSON.stringify({ criteria: [] })),
     );
 
     await expect(

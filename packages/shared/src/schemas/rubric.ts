@@ -15,12 +15,6 @@ export const RubricSchema = z.object({
       description: z.string(),
     }),
   ),
-  tests: z.array(
-    z.object({
-      id: z.string(),
-      text: z.string(),
-    }),
-  ),
 });
 
 export type Rubric = z.infer<typeof RubricSchema>;
