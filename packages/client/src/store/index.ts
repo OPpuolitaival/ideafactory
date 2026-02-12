@@ -20,9 +20,12 @@ export interface SessionData {
   taxonomy: { tree: TaxonomyNode; selectedPath: string[] | null } | null;
   methods: { recommended: number[]; reasoning: Record<string, string>; selected: number[] } | null;
   rubric: Rubric | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- DB JSON columns are untyped
   ideas: { id: string; phase: string; workerId: string | null; data: any }[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- DB JSON columns are untyped
   qaSheets: { ideaId: string; feasibilityScore: number; verdict: string; summary: string; risks: any[] }[];
   ideaPackages: { ideaId: string; ideaName: string; htmlContent: string; deepResearchPrompt: string }[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- DB JSON columns are untyped
   eventLog: { type: string; data: any; createdAt?: number }[];
 }
 

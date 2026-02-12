@@ -59,7 +59,7 @@ let consoleErrors: string[] = [];
 const originalLog = console.log;
 const originalError = console.error;
 
-const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {
+const _mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {
   throw new Error('process.exit');
 }) as never);
 

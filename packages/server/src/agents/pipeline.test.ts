@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createTestDb, type TestDb } from '../__tests__/setup.js';
 import * as schema from '../db/schema.js';
-import { eq } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
 // Mock: sseManager
@@ -117,7 +116,7 @@ async function insertRubric(db: TestDb, sessionId: string) {
   });
 }
 
-async function insertIdea(
+async function _insertIdea(
   db: TestDb,
   id: string,
   sessionId: string,

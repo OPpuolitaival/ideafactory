@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createTestDb, type TestDb } from '../__tests__/setup.js';
 import { schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
+import type { Rubric } from '@ideafactory/shared';
 
 // Mock the pipeline module to avoid real LLM calls
 vi.mock('../agents/pipeline.js', () => ({
@@ -504,7 +505,7 @@ describe('session router', () => {
           rubric: {
             gates: [{ id: 'g1', text: 'ok' }],
             criteria: [{ id: 'c1' }], // missing text, weight, description
-          } as any,
+          } as Partial<Rubric>,
         }),
       ).rejects.toThrow();
     });

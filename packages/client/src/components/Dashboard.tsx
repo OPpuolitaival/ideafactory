@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import type { Stage } from '@ideafactory/shared';
 import { trpc } from '../trpc/index.js';
 import { useSessionStore } from '../store/index.js';
 import { ModelSelector } from './ModelSelector.js';
@@ -65,7 +66,7 @@ export function Dashboard({ onStartSession }: DashboardProps) {
     } catch {
       store.setSessionId(id);
       store.setDomain(session.domain);
-      store.setStage(session.status as any);
+      store.setStage(session.status as Stage);
     }
 
     onStartSession();

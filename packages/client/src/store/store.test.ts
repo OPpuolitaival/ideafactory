@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { useSessionStore } from './index.js';
 import type { SSEEvent } from '@ideafactory/shared';
 import type { TaxonomyNode, Rubric, RawIdea, ScoredIdea, QAResult, IdeaPackage } from '@ideafactory/shared';

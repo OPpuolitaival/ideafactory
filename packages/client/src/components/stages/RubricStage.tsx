@@ -1,6 +1,5 @@
 import { useSessionStore } from '../../store/index.js';
 import { trpc } from '../../trpc/index.js';
-import type { Rubric } from '@ideafactory/shared';
 
 export function RubricStage({ readOnly }: { readOnly?: boolean } = {}) {
   const { rubric, isLoading, sessionId, setRubric, setStage, setLoading } = useSessionStore();

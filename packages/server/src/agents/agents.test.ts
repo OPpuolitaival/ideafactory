@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createTestDb, type TestDb } from '../__tests__/setup.js';
 import * as schema from '../db/schema.js';
 import { eq } from 'drizzle-orm';
@@ -1237,8 +1237,8 @@ describe('callLLM', () => {
         signal: controller.signal,
       });
       expect.fail('should have thrown');
-    } catch (err: any) {
-      expect(err.name).toBe('AbortError');
+    } catch (err: unknown) {
+      expect((err as Error).name).toBe('AbortError');
       expect(err).toBeInstanceOf(DOMException);
     }
   });
@@ -1269,8 +1269,8 @@ describe('callLLM', () => {
         signal: controller.signal,
       });
       expect.fail('should have thrown');
-    } catch (err: any) {
-      expect(err.name).toBe('AbortError');
+    } catch (err: unknown) {
+      expect((err as Error).name).toBe('AbortError');
       expect(err).toBeInstanceOf(DOMException);
     }
   });

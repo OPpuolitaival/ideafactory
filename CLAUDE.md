@@ -55,10 +55,10 @@ taxonomy → methods → rubric → factory → completed
 
 | Stage | Agent | Model (default) | Temp | Key File |
 |-------|-------|-----------------|------|----------|
-| Taxonomy | Navigator | claude-haiku-4 | 0.7 | `agents/navigator.ts` |
-| Methods | Strategist | claude-sonnet-4 | 0.6 | `agents/strategist.ts` |
-| Rubric | Strategist | claude-sonnet-4 | 0.6 | `agents/strategist.ts` |
-| Factory | Workers + Analyst | claude-sonnet-4 | 0.5–0.9 | `agents/factory.ts` |
+| Taxonomy | Navigator | claude-opus-4-6 | 0.7 | `agents/navigator.ts` |
+| Methods | Strategist | claude-opus-4-6 | 0.6 | `agents/strategist.ts` |
+| Rubric | Strategist | claude-opus-4-6 | 0.6 | `agents/strategist.ts` |
+| Factory | Workers + Analyst | claude-opus-4-6 | 0.5–0.9 | `agents/factory.ts` |
 
 The Factory stage has automated sub-phases: **Diverge** (one worker per selected method, on-the-fly personas from method fields, temp=0.9) → **Converge** (batched scoring in groups of 5, gate filtering + top-N selection, temp=0.5) → **Evolve** (pair-based cross-pollination with re-scoring, returns survivors + evolved combined, temp=0.7) → **Interactive** (user selects ideas for QA and packaging via tRPC mutations).
 

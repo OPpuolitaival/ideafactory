@@ -259,7 +259,7 @@ describe('RubricSchema', () => {
   });
 
   it('rejects missing gates field', () => {
-    const { gates, ...rest } = validRubric;
+    const { gates: _gates, ...rest } = validRubric;
     const result = RubricSchema.safeParse(rest);
     expect(result.success).toBe(false);
   });
@@ -298,19 +298,19 @@ describe('RawIdeaSchema', () => {
   });
 
   it('rejects missing required fields (no name)', () => {
-    const { name, ...rest } = validIdea;
+    const { name: _name, ...rest } = validIdea;
     const result = RawIdeaSchema.safeParse(rest);
     expect(result.success).toBe(false);
   });
 
   it('rejects missing required fields (no description)', () => {
-    const { description, ...rest } = validIdea;
+    const { description: _description, ...rest } = validIdea;
     const result = RawIdeaSchema.safeParse(rest);
     expect(result.success).toBe(false);
   });
 
   it('rejects missing required fields (no workerId)', () => {
-    const { workerId, ...rest } = validIdea;
+    const { workerId: _workerId, ...rest } = validIdea;
     const result = RawIdeaSchema.safeParse(rest);
     expect(result.success).toBe(false);
   });
@@ -539,25 +539,25 @@ describe('IdeaPackageSchema', () => {
   });
 
   it('rejects missing ideaId', () => {
-    const { ideaId, ...rest } = validPackage;
+    const { ideaId: _ideaId, ...rest } = validPackage;
     const result = IdeaPackageSchema.safeParse(rest);
     expect(result.success).toBe(false);
   });
 
   it('rejects missing ideaName', () => {
-    const { ideaName, ...rest } = validPackage;
+    const { ideaName: _ideaName, ...rest } = validPackage;
     const result = IdeaPackageSchema.safeParse(rest);
     expect(result.success).toBe(false);
   });
 
   it('rejects missing htmlContent', () => {
-    const { htmlContent, ...rest } = validPackage;
+    const { htmlContent: _htmlContent, ...rest } = validPackage;
     const result = IdeaPackageSchema.safeParse(rest);
     expect(result.success).toBe(false);
   });
 
   it('rejects missing deepResearchPrompt', () => {
-    const { deepResearchPrompt, ...rest } = validPackage;
+    const { deepResearchPrompt: _deepResearchPrompt, ...rest } = validPackage;
     const result = IdeaPackageSchema.safeParse(rest);
     expect(result.success).toBe(false);
   });
@@ -712,7 +712,7 @@ describe('SessionSchema', () => {
   });
 
   it('accepts optional coordinate as undefined', () => {
-    const { coordinate, ...rest } = validSession;
+    const { coordinate: _coordinate, ...rest } = validSession;
     const result = SessionSchema.safeParse(rest);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -736,7 +736,7 @@ describe('SessionSchema', () => {
   });
 
   it('rejects missing id', () => {
-    const { id, ...rest } = validSession;
+    const { id: _id, ...rest } = validSession;
     const result = SessionSchema.safeParse(rest);
     expect(result.success).toBe(false);
   });

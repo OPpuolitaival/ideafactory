@@ -209,19 +209,20 @@ export async function callLLM(options: LLMCallOptions): Promise<string> {
           resultText = message.result as string;
         }
       } else if (message.type === 'stream_event' && sessionId && agentName) {
-        const event = (message as any).event;
+        const event = (message as { event: unknown }).event;
         if (!event) continue;
 
-        if (event.type === 'content_block_start' && !emittedGenerating) {
+        const eventObj = event as { type?: string; delta?: { type?: string; text?: string; partial_json?: string }; usage?: { output_tokens?: number } };
+        if (eventObj.type === 'content_block_start' && !emittedGenerating) {
           emittedGenerating = true;
           sseManager.emit(sessionId, {
             type: 'agent:thought',
             data: { agent: agentName, text: 'Generating response...', model },
           });
           lastProgressEmit = Date.now();
-        } else if (event.type === 'content_block_delta') {
+        } else if (eventObj.type === 'content_block_delta') {
           // Approximate token count from text deltas (~4 chars per token)
-          const delta = event.delta;
+          const delta = eventObj.delta;
           if (delta?.type === 'text_delta' && delta.text) {
             approxTokens += Math.ceil(delta.text.length / 4);
           } else if (delta?.type === 'input_json_delta' && delta.partial_json) {
@@ -240,12 +241,12 @@ export async function callLLM(options: LLMCallOptions): Promise<string> {
             });
             lastProgressEmit = now;
           }
-        } else if (event.type === 'message_delta' && event.usage?.output_tokens) {
+        } else if (eventObj.type === 'message_delta' && eventObj.usage?.output_tokens) {
           sseManager.emit(sessionId, {
             type: 'agent:thought',
             data: {
               agent: agentName,
-              text: `Response complete (${event.usage.output_tokens.toLocaleString()} output tokens)`,
+              text: `Response complete (${eventObj.usage.output_tokens.toLocaleString()} output tokens)`,
               model,
             },
           });

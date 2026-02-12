@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 import { getDb, schema } from '../db/index.js';
-import { loadConfig, getAllMethods } from '../config/index.js';
+import { loadConfig } from '../config/index.js';
 import { runPipeline } from '../agents/pipeline.js';
 import { sseManager } from '../sse/index.js';
 import { nanoid } from 'nanoid';

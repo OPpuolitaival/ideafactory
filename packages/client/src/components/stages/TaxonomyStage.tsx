@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { useSessionStore } from '../../store/index.js';
 import { trpc } from '../../trpc/index.js';
 import type { TaxonomyNode } from '@ideafactory/shared';

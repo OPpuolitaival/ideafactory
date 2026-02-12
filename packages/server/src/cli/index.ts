@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import '../env.js';
-import { parseArgs } from 'node:util';
 import { runCommand } from './commands.js';
 
 const args = process.argv.slice(2);
