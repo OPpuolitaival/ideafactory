@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useSessionStore } from '../store/index.js';
 import type { ModelOption } from '../store/index.js';
+import { useT } from '../i18n/index.js';
 
 function getModelColor(modelOptions: ModelOption[], model?: string): string {
   const opt = modelOptions.find((m) => m.id === model);
@@ -27,10 +28,18 @@ const MIN_HEIGHT = 80;
 const MAX_HEIGHT_RATIO = 0.5;
 
 export function ThoughtFeed() {
+  const t = useT();
   const thoughts = useSessionStore((s) => s.thoughts);
   const stageModels = useSessionStore((s) => s.stageModels);
   const sseStatus = useSessionStore((s) => s.sseStatus);
   const modelOptions = useSessionStore((s) => s.modelOptions);
+
+  const sseStatusLabels: Record<string, string> = {
+    connected: '',
+    connecting: t('thoughtFeed.connecting'),
+    reconnecting: t('thoughtFeed.reconnecting'),
+    disconnected: t('thoughtFeed.disconnected'),
+  };
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoScroll = useRef(true);
   const [collapsed, setCollapsed] = useState(false);
@@ -90,14 +99,14 @@ export function ThoughtFeed() {
         onClick={() => setCollapsed(!collapsed)}
       >
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-medium text-gray-300">Agent Thoughts</h3>
+          <h3 className="text-sm font-medium text-gray-300">{t('thoughtFeed.title')}</h3>
           <span
             className={`inline-block w-2 h-2 rounded-full ${SSE_STATUS_CONFIG[sseStatus].color}`}
             title={sseStatus}
           />
-          {SSE_STATUS_CONFIG[sseStatus].label && (
+          {sseStatusLabels[sseStatus] && (
             <span className="text-xs text-gray-500">
-              {SSE_STATUS_CONFIG[sseStatus].label}
+              {sseStatusLabels[sseStatus]}
             </span>
           )}
         </div>
@@ -112,7 +121,7 @@ export function ThoughtFeed() {
           className="flex-1 overflow-y-auto px-4 pb-2 space-y-1 font-mono text-xs min-h-0"
         >
           {thoughts.length === 0 && (
-            <p className="text-gray-500 text-center mt-4">Agent thoughts will appear here...</p>
+            <p className="text-gray-500 text-center mt-4">{t('thoughtFeed.empty')}</p>
           )}
           {thoughts.map((t) => {
             if (t.stageCheckpoint) {

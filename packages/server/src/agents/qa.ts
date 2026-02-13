@@ -10,6 +10,7 @@ import { qaResultJsonSchema } from './schemas.js';
 import { sseManager } from '../sse/index.js';
 import { getDb, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
+import { getLocaleInstruction } from './locale.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CRITIC_SKILL = fs.readFileSync(
@@ -23,11 +24,13 @@ interface RunQAOptions {
   rubric: Rubric;
   model: string;
   signal?: AbortSignal;
+  locale?: string;
 }
 
 export async function runQAForIdeas(options: RunQAOptions): Promise<void> {
-  const { sessionId, ideaIds, rubric, model, signal } = options;
+  const { sessionId, ideaIds, rubric, model, signal, locale } = options;
   const db = getDb();
+  const localeInstr = getLocaleInstruction(locale);
 
   // Fetch selected ideas from DB
   const allIdeas = await db
@@ -63,7 +66,7 @@ export async function runQAForIdeas(options: RunQAOptions): Promise<void> {
       const qaResult = await callLLMWithRetry(
         {
           model,
-          system: `${CRITIC_SKILL}\n\nYou are in QA MODE. Reality-check a single concept.`,
+          system: `${CRITIC_SKILL}\n\nYou are in QA MODE. Reality-check a single concept.${localeInstr}`,
           prompt: `Perform QA critique on this concept. Return a single JSON object.
 
 Concept: "${idea.name}" (score: ${idea.score ?? 'N/A'})

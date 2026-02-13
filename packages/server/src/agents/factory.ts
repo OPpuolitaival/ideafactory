@@ -15,6 +15,7 @@ import {
 import { eq, and } from 'drizzle-orm';
 import { sseManager } from '../sse/index.js';
 import { getDb, schema } from '../db/index.js';
+import { getLocaleInstruction } from './locale.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const IDEATION_SKILL = fs.readFileSync(
@@ -82,6 +83,7 @@ interface RunFactoryOptions {
   analystModel: string;
   signal?: AbortSignal;
   resume?: boolean;
+  locale?: string;
 }
 
 export async function runFactory(options: RunFactoryOptions): Promise<void> {
@@ -96,6 +98,7 @@ export async function runFactory(options: RunFactoryOptions): Promise<void> {
     analystModel,
     signal,
     resume,
+    locale,
   } = options;
 
   const db = getDb();
@@ -137,7 +140,7 @@ export async function runFactory(options: RunFactoryOptions): Promise<void> {
         data: { phase: 'evolve', detail: `Evolving ${survivors.length} concepts...` },
       });
 
-      const evolved = await runEvolution({ sessionId, survivors, rubric, coordinate, model: analystModel, signal });
+      const evolved = await runEvolution({ sessionId, survivors, rubric, coordinate, model: analystModel, signal, locale });
       sseManager.emit(sessionId, { type: 'data:evolution_result', data: { evolved } });
       sseManager.emit(sessionId, { type: 'factory:interactive', data: { combinedPool: evolved } });
       return;
@@ -160,12 +163,13 @@ export async function runFactory(options: RunFactoryOptions): Promise<void> {
     const allIdeas = await runDivergence({
       sessionId, domain, coordinate, methods, rubric, ideasPerWorker, model: workerModel, signal,
       skipWorkerIds: progress.completedWorkerIds,
+      locale,
     });
 
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
     // Continue with converge → evolve → interactive
-    await runConvergeEvolveInteractive({ sessionId, allIdeas, rubric, coordinate, analystModel, signal });
+    await runConvergeEvolveInteractive({ sessionId, allIdeas, rubric, coordinate, analystModel, signal, locale });
     return;
   }
 
@@ -180,12 +184,13 @@ export async function runFactory(options: RunFactoryOptions): Promise<void> {
 
   const allIdeas = await runDivergence({
     sessionId, domain, coordinate, methods, rubric, ideasPerWorker, model: workerModel, signal,
+    locale,
   });
 
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
   // Continue with converge → evolve → interactive
-  await runConvergeEvolveInteractive({ sessionId, allIdeas, rubric, coordinate, analystModel, signal });
+  await runConvergeEvolveInteractive({ sessionId, allIdeas, rubric, coordinate, analystModel, signal, locale });
 }
 
 /** Shared tail of the pipeline: convergence → evolution → interactive */
@@ -196,8 +201,9 @@ async function runConvergeEvolveInteractive(opts: {
   coordinate: string;
   analystModel: string;
   signal?: AbortSignal;
+  locale?: string;
 }): Promise<void> {
-  const { sessionId, allIdeas, rubric, coordinate, analystModel, signal } = opts;
+  const { sessionId, allIdeas, rubric, coordinate, analystModel, signal, locale } = opts;
 
   // Phase B: Convergence (batched scoring)
   sseManager.emit(sessionId, {
@@ -215,6 +221,7 @@ async function runConvergeEvolveInteractive(opts: {
     rubric,
     model: analystModel,
     signal,
+    locale,
   });
 
   sseManager.emit(sessionId, {
@@ -241,6 +248,7 @@ async function runConvergeEvolveInteractive(opts: {
     coordinate,
     model: analystModel,
     signal,
+    locale,
   });
 
   sseManager.emit(sessionId, {
@@ -322,10 +330,12 @@ interface BatchScoreOptions {
   model: string;
   signal?: AbortSignal;
   phaseLabel: string;
+  locale?: string;
 }
 
 async function batchScore(options: BatchScoreOptions): Promise<ScoredIdea[]> {
-  const { sessionId, ideas, rubric, model, signal, phaseLabel } = options;
+  const { sessionId, ideas, rubric, model, signal, phaseLabel, locale } = options;
+  const localeInstr = getLocaleInstruction(locale);
 
   // Split into batches
   const batches: typeof ideas[] = [];
@@ -352,7 +362,7 @@ async function batchScore(options: BatchScoreOptions): Promise<ScoredIdea[]> {
         const scored = await callLLMWithRetry(
           {
             model,
-            system: `${CRITIC_SKILL}\n\nYou are in CONVERGENCE MODE. Score ideas independently.`,
+            system: `${CRITIC_SKILL}\n\nYou are in CONVERGENCE MODE. Score ideas independently.${localeInstr}`,
             prompt: `Score these ${batch.length} ideas independently against the rubric. Return a JSON array.
 
 ## Rubric
@@ -432,6 +442,7 @@ interface DivergenceOptions {
   model: string;
   signal?: AbortSignal;
   skipWorkerIds?: string[];
+  locale?: string;
 }
 
 async function runDivergence(options: DivergenceOptions): Promise<RawIdea[]> {
@@ -445,7 +456,9 @@ async function runDivergence(options: DivergenceOptions): Promise<RawIdea[]> {
     model,
     signal,
     skipWorkerIds,
+    locale,
   } = options;
+  const localeInstr = getLocaleInstruction(locale);
 
   const db = getDb();
   const rubricSummary = [
@@ -529,7 +542,7 @@ async function runDivergence(options: DivergenceOptions): Promise<RawIdea[]> {
         const ideas = await callLLMWithRetry(
           {
             model,
-            system: `${IDEATION_SKILL}\n\n## Your Methodology\n\n${buildMethodPersona(method)}`,
+            system: `${IDEATION_SKILL}\n\n## Your Methodology\n\n${buildMethodPersona(method)}${localeInstr}`,
             prompt: `Generate ${ideasPerWorker} ideas using ONLY the "${method.name}" method.
 
 Domain: "${domain}"
@@ -655,12 +668,13 @@ interface ConvergenceOptions {
   rubric: Rubric;
   model: string;
   signal?: AbortSignal;
+  locale?: string;
 }
 
 async function runConvergence(
   options: ConvergenceOptions,
 ): Promise<{ survivors: ScoredIdea[]; eliminated: ScoredIdea[] }> {
-  const { sessionId, ideas, rubric, model, signal } = options;
+  const { sessionId, ideas, rubric, model, signal, locale } = options;
   const db = getDb();
 
   // Step 1: Score all ideas in batches
@@ -679,6 +693,7 @@ async function runConvergence(
     model,
     signal,
     phaseLabel: 'converge',
+    locale,
   });
 
   // Step 2: Gate elimination (in code, not LLM)
@@ -742,10 +757,12 @@ interface EvolutionOptions {
   coordinate: string;
   model: string;
   signal?: AbortSignal;
+  locale?: string;
 }
 
 async function runEvolution(options: EvolutionOptions): Promise<ScoredIdea[]> {
-  const { sessionId, survivors, rubric, coordinate, model, signal } = options;
+  const { sessionId, survivors, rubric, coordinate, model, signal, locale } = options;
+  const localeInstr = getLocaleInstruction(locale);
   const db = getDb();
 
   // Step 1: Generate all C(n,2) pairs, shuffle, distribute to workers
@@ -784,7 +801,7 @@ async function runEvolution(options: EvolutionOptions): Promise<ScoredIdea[]> {
       const concepts = await callLLMWithRetry(
         {
           model,
-          system: `You are an idea evolution specialist. Your job is to create novel concepts by cross-pollinating features, mechanisms, and insights from pairs of ideas. Each pair should inspire at least one new concept that combines the best of both.`,
+          system: `You are an idea evolution specialist. Your job is to create novel concepts by cross-pollinating features, mechanisms, and insights from pairs of ideas. Each pair should inspire at least one new concept that combines the best of both.${localeInstr}`,
           prompt: `Create new concepts by cross-pollinating these idea pairs for the coordinate "${coordinate}".
 
 ${pairsText}
@@ -857,6 +874,7 @@ Return ONLY the JSON array, no other text.`,
     model,
     signal,
     phaseLabel: 'rescore',
+    locale,
   });
 
   // Step 4: Gate filter + top-N selection

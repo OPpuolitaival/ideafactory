@@ -3,12 +3,15 @@ import type { Stage } from '@ideafactory/shared';
 import { trpc } from '../trpc/index.js';
 import { useSessionStore } from '../store/index.js';
 import { ModelSelector } from './ModelSelector.js';
+import { useLocale, useT } from '../i18n/index.js';
 
 interface DashboardProps {
   onStartSession: () => void;
 }
 
 export function Dashboard({ onStartSession }: DashboardProps) {
+  const t = useT();
+  const { locale } = useLocale();
   const [domain, setDomain] = useState('');
   const [modelsOpen, setModelsOpen] = useState(false);
   const configQuery = trpc.config.getConfig.useQuery();
@@ -45,7 +48,7 @@ export function Dashboard({ onStartSession }: DashboardProps) {
     if (!domain.trim()) return;
     const result = await startMutation.mutateAsync({
       domain: domain.trim(),
-      config: { models },
+      config: { models, locale },
     });
     store.setSessionId(result.sessionId);
     store.setDomain(domain.trim());
@@ -85,9 +88,9 @@ export function Dashboard({ onStartSession }: DashboardProps) {
   return (
     <div className="flex-1 p-6 max-w-4xl mx-auto w-full">
       <div className="mb-12 mt-8">
-        <h2 className="text-3xl font-bold mb-2">Start a new session</h2>
+        <h2 className="text-3xl font-bold mb-2">{t('dashboard.startTitle')}</h2>
         <p className="text-gray-400 mb-6">
-          Enter a domain to explore. The more specific or broad — it's up to you.
+          {t('dashboard.startDescription')}
         </p>
         <div className="flex gap-3">
           <input
@@ -95,7 +98,7 @@ export function Dashboard({ onStartSession }: DashboardProps) {
             value={domain}
             onChange={(e) => setDomain(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleStart()}
-            placeholder='e.g., "Future of Chairs", "Sustainable Packaging"'
+            placeholder={t('dashboard.placeholder')}
             className="input flex-1 text-lg"
             autoFocus
           />
@@ -104,7 +107,7 @@ export function Dashboard({ onStartSession }: DashboardProps) {
             disabled={!domain.trim() || startMutation.isPending}
             className="btn-primary text-lg px-8"
           >
-            {startMutation.isPending ? 'Starting...' : 'Generate'}
+            {startMutation.isPending ? t('dashboard.starting') : t('dashboard.generate')}
           </button>
         </div>
         <div className="mt-3">
@@ -112,7 +115,7 @@ export function Dashboard({ onStartSession }: DashboardProps) {
             onClick={() => setModelsOpen(!modelsOpen)}
             className="btn-ghost text-xs text-gray-400"
           >
-            {modelsOpen ? '▾' : '▸'} Models
+            {modelsOpen ? '▾' : '▸'} {t('dashboard.models')}
           </button>
           {modelsOpen && (
             <div className="mt-2 space-y-2 p-3 bg-bg-1 rounded-lg border border-bg-3">
@@ -142,7 +145,7 @@ export function Dashboard({ onStartSession }: DashboardProps) {
       </div>
 
       <div>
-        <h3 className="text-xl font-semibold mb-4">Past Sessions</h3>
+        <h3 className="text-xl font-semibold mb-4">{t('dashboard.pastSessions')}</h3>
         {sessionsQuery.isLoading && (
           <div className="space-y-3">
             {[1, 2, 3].map((i) => (
@@ -151,7 +154,7 @@ export function Dashboard({ onStartSession }: DashboardProps) {
           </div>
         )}
         {sessionsQuery.data?.length === 0 && (
-          <p className="text-gray-500">No sessions yet. Start one above.</p>
+          <p className="text-gray-500">{t('dashboard.noSessions')}</p>
         )}
         <div className="space-y-3">
           {sessionsQuery.data?.map((session) => (
@@ -176,7 +179,7 @@ export function Dashboard({ onStartSession }: DashboardProps) {
                         : 'bg-warning/20 text-warning'
                     }`}
                   >
-                    {session.status === 'completed' ? 'Completed' : `In progress: ${session.status}`}
+                    {session.status === 'completed' ? t('dashboard.completed') : `${t('dashboard.inProgress')}: ${session.status}`}
                   </span>
                   {session.config?.models && (() => {
                     const sm = session.config.models;
@@ -190,7 +193,7 @@ export function Dashboard({ onStartSession }: DashboardProps) {
                           : { backgroundColor: 'rgba(110,86,207,0.2)', color: '#8b78e6' }
                         }
                       >
-                        {allSame && opt ? opt.label : 'Mixed'}
+                        {allSame && opt ? opt.label : t('dashboard.mixed')}
                       </span>
                     );
                   })()}
@@ -204,7 +207,7 @@ export function Dashboard({ onStartSession }: DashboardProps) {
                   }}
                   className="btn-ghost text-sm"
                 >
-                  Duplicate
+                  {t('dashboard.duplicate')}
                 </button>
                 <button
                   onClick={(e) => {
@@ -213,7 +216,7 @@ export function Dashboard({ onStartSession }: DashboardProps) {
                   }}
                   className="btn-ghost text-danger text-sm"
                 >
-                  Delete
+                  {t('dashboard.delete')}
                 </button>
               </div>
             </div>

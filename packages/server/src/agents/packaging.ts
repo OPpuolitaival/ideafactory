@@ -9,6 +9,7 @@ import { ideaPackageJsonSchema } from './schemas.js';
 import { sseManager } from '../sse/index.js';
 import { getDb, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
+import { getLocaleInstruction } from './locale.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGING_SKILL = fs.readFileSync(
@@ -23,11 +24,13 @@ interface PackageIdeasOptions {
   coordinate: string;
   model: string;
   signal?: AbortSignal;
+  locale?: string;
 }
 
 export async function packageIdeas(options: PackageIdeasOptions): Promise<void> {
-  const { sessionId, ideaIds, domain, coordinate, model, signal } = options;
+  const { sessionId, ideaIds, domain, coordinate, model, signal, locale } = options;
   const db = getDb();
+  const localeInstr = getLocaleInstruction(locale);
 
   // Fetch ideas
   const allIdeas = await db
@@ -72,7 +75,7 @@ export async function packageIdeas(options: PackageIdeasOptions): Promise<void> 
       const pkg = await callLLMWithRetry(
         {
           model,
-          system: PACKAGING_SKILL,
+          system: PACKAGING_SKILL + localeInstr,
           prompt: `Package this idea for delivery.
 
 Domain: "${domain}"
