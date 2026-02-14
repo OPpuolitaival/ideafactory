@@ -1,6 +1,8 @@
+import type { Method } from '@ideafactory/shared';
 import { useSessionStore } from '../../store/index.js';
 import { trpc } from '../../trpc/index.js';
 import { useT } from '../../i18n/index.js';
+import type { TranslationKey } from '../../i18n/en.js';
 
 export function MethodsStage({ readOnly }: { readOnly?: boolean } = {}) {
   const t = useT();
@@ -32,6 +34,19 @@ export function MethodsStage({ readOnly }: { readOnly?: boolean } = {}) {
 
   const methods = methodsQuery.data ?? [];
 
+  const localizedMethod = (method: Method) => {
+    if (!method.builtIn) return method;
+    const nameKey = `method.${method.id}.name` as TranslationKey;
+    const descKey = `method.${method.id}.description` as TranslationKey;
+    const goodForKey = `method.${method.id}.goodFor` as TranslationKey;
+    return {
+      ...method,
+      name: t(nameKey),
+      description: t(descKey),
+      goodFor: t(goodForKey),
+    };
+  };
+
   if (isLoading && methods.length === 0) {
     return (
       <div className="max-w-4xl mx-auto">
@@ -57,7 +72,8 @@ export function MethodsStage({ readOnly }: { readOnly?: boolean } = {}) {
       </p>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        {methods.map((method) => {
+        {methods.map((rawMethod: Method) => {
+          const method = localizedMethod(rawMethod);
           const isRecommended = recommendedMethods.includes(method.id);
           const isSelected = selectedMethods.includes(method.id);
           const reasoning = methodReasoning[String(method.id)];

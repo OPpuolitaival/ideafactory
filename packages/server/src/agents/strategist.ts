@@ -81,12 +81,22 @@ Return ONLY the JSON object. No markdown, no code blocks, no extra text.`,
 
   // Persist to database
   const db = getDb();
-  await db.insert(schema.methodSelections).values({
-    sessionId,
-    recommended: JSON.stringify(recommendation.recommended),
-    reasoning: JSON.stringify(recommendation.reasoning),
-    selected: JSON.stringify(recommendation.recommended), // default selection = recommended
-  });
+  await db
+    .insert(schema.methodSelections)
+    .values({
+      sessionId,
+      recommended: JSON.stringify(recommendation.recommended),
+      reasoning: JSON.stringify(recommendation.reasoning),
+      selected: JSON.stringify(recommendation.recommended), // default selection = recommended
+    })
+    .onConflictDoUpdate({
+      target: schema.methodSelections.sessionId,
+      set: {
+        recommended: JSON.stringify(recommendation.recommended),
+        reasoning: JSON.stringify(recommendation.reasoning),
+        selected: JSON.stringify(recommendation.recommended),
+      },
+    });
 
   // Emit to client
   sseManager.emit(sessionId, {
