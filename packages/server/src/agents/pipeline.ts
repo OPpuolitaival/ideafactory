@@ -42,6 +42,7 @@ export async function runPipeline(sessionId: string, stage: Stage, options?: Pip
           webSearch: sessionConfig.webSearch ?? false,
           model: sessionConfig.models?.navigator ?? config.models.navigator,
           signal: controller.signal,
+          locale: sessionConfig.locale,
         });
 
         sseManager.emit(sessionId, {
@@ -66,6 +67,7 @@ export async function runPipeline(sessionId: string, stage: Stage, options?: Pip
           methods: getAllMethods(),
           model: sessionConfig.models?.strategist ?? config.models.strategist,
           signal: controller.signal,
+          locale: sessionConfig.locale,
         });
 
         sseManager.emit(sessionId, {
@@ -102,6 +104,7 @@ export async function runPipeline(sessionId: string, stage: Stage, options?: Pip
           methods: selectedMethods,
           model: sessionConfig.models?.strategist ?? config.models.strategist,
           signal: controller.signal,
+          locale: sessionConfig.locale,
         });
 
         sseManager.emit(sessionId, {
@@ -149,6 +152,7 @@ export async function runPipeline(sessionId: string, stage: Stage, options?: Pip
           analystModel: sessionConfig.models?.analyst ?? config.models.analyst,
           signal: controller.signal,
           resume: options?.resume,
+          locale: sessionConfig.locale,
         });
 
         // Do NOT emit stage_complete — factory stays in interactive mode.

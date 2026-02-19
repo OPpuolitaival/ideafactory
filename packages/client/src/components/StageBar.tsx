@@ -2,6 +2,7 @@ import { useSessionStore } from '../store/index.js';
 import type { ModelOption } from '../store/index.js';
 import { STAGES, STAGE_ORDER } from '@ideafactory/shared';
 import type { Stage } from '@ideafactory/shared';
+import { useT } from '../i18n/index.js';
 
 function getModelColor(modelOptions: ModelOption[], model?: string): string | undefined {
   const opt = modelOptions.find((m) => m.id === model);
@@ -14,11 +15,19 @@ interface StageBarProps {
 }
 
 export function StageBar({ onStageClick, viewingStage }: StageBarProps) {
+  const t = useT();
   const currentStage = useSessionStore((s) => s.stage);
   const isLoading = useSessionStore((s) => s.isLoading);
   const stageModels = useSessionStore((s) => s.stageModels);
   const modelOptions = useSessionStore((s) => s.modelOptions);
   const currentIdx = STAGE_ORDER.indexOf(currentStage);
+
+  const stageLabels: Record<string, string> = {
+    taxonomy: t('stage.taxonomy'),
+    methods: t('stage.methods'),
+    rubric: t('stage.rubric'),
+    factory: t('stage.factory'),
+  };
 
   return (
     <nav className="bg-bg-1 border-b border-bg-3 px-6 py-3">
@@ -65,7 +74,7 @@ export function StageBar({ onStageClick, viewingStage }: StageBarProps) {
                 >
                   {isComplete ? '✓' : stage.number}
                 </span>
-                <span>{stage.label}</span>
+                <span>{stageLabels[stage.id] ?? stage.label}</span>
                 {isComplete && stageModels[stage.id] && (
                   <span
                     className="w-1.5 h-1.5 rounded-full"

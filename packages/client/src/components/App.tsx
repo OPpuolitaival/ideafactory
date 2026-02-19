@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useSessionStore } from '../store/index.js';
 import { useSSE } from '../hooks/useSSE.js';
 import { trpc } from '../trpc/index.js';
+import { useT } from '../i18n/index.js';
 import { Topbar } from './Topbar.js';
 import { StageBar } from './StageBar.js';
 import { ThoughtFeed } from './ThoughtFeed.js';
@@ -25,6 +26,7 @@ export function App() {
   const [viewingStage, setViewingStage] = useState<Stage | null>(null);
   const [rollbackTarget, setRollbackTarget] = useState<RollbackStage | null>(null);
 
+  const t = useT();
   const rollbackMutation = trpc.session.rollback.useMutation();
   const duplicateMutation = trpc.session.duplicate.useMutation();
   const utils = trpc.useUtils();
@@ -116,14 +118,14 @@ export function App() {
       {viewingStage && (
         <div className="flex items-center justify-between px-6 py-2 bg-accent/5 border-b border-accent/20 text-sm">
           <span className="text-accent-light">
-            Viewing <span className="font-medium">{viewingStage}</span> stage (read-only)
+            {t('app.viewing')} <span className="font-medium">{viewingStage}</span> {t('app.stageReadOnly')}
           </span>
           <div className="flex gap-2">
             <button
               onClick={() => setViewingStage(null)}
               className="btn-ghost text-xs"
             >
-              Back to current
+              {t('app.backToCurrent')}
             </button>
             <button
               onClick={() => {
@@ -133,7 +135,7 @@ export function App() {
               }}
               className="btn-ghost text-xs text-warning"
             >
-              Edit from here...
+              {t('app.editFromHere')}
             </button>
           </div>
         </div>

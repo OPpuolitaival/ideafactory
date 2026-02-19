@@ -8,6 +8,7 @@ import { coerceAndParse } from './coerce.js';
 import { taxonomyJsonSchema } from './schemas.js';
 import { sseManager } from '../sse/index.js';
 import { getDb, schema } from '../db/index.js';
+import { getLocaleInstruction } from './locale.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SKILL_MD = fs.readFileSync(
@@ -28,6 +29,7 @@ interface RunTaxonomyOptions {
   webSearch: boolean;
   model: string;
   signal?: AbortSignal;
+  locale?: string;
 }
 
 /**
@@ -38,11 +40,13 @@ async function generateSkeleton(
   model: string,
   sessionId: string,
   signal?: AbortSignal,
+  locale?: string,
 ): Promise<TaxonomyNode> {
+  const localeInstr = getLocaleInstruction(locale);
   return callLLMWithRetry(
     {
       model,
-      system: SKILL_MD,
+      system: SKILL_MD + localeInstr,
       timeoutMs: 60_000,
       signal,
       prompt: `Generate ONLY the top-level skeleton for the domain: "${domain}"
@@ -89,6 +93,7 @@ async function expandBranch(
   index: number,
   total: number,
   signal?: AbortSignal,
+  locale?: string,
 ): Promise<TaxonomyNode> {
   const siblingsStr = siblingNames
     .filter((n) => n !== category.name)
@@ -96,6 +101,7 @@ async function expandBranch(
     .join('\n');
 
   const branchAgent = `Navigator ${index + 1}`;
+  const localeInstr = getLocaleInstruction(locale);
 
   sseManager.emit(sessionId, {
     type: 'agent:thought',
@@ -109,7 +115,7 @@ async function expandBranch(
   return callLLMWithRetry(
     {
       model,
-      system: BRANCH_EXPANSION_MD,
+      system: BRANCH_EXPANSION_MD + localeInstr,
       timeoutMs: 90_000,
       signal,
       prompt: `Domain: "${domain}"
@@ -170,7 +176,7 @@ async function processInChunks<T, R>(
 }
 
 export async function runTaxonomy(options: RunTaxonomyOptions): Promise<void> {
-  const { sessionId, domain, model } = options;
+  const { sessionId, domain, model, locale } = options;
 
   sseManager.emit(sessionId, {
     type: 'agent:thought',
@@ -178,7 +184,7 @@ export async function runTaxonomy(options: RunTaxonomyOptions): Promise<void> {
   });
 
   // ── Phase 1: Skeleton ──
-  const skeleton = await generateSkeleton(domain, model, sessionId, options.signal);
+  const skeleton = await generateSkeleton(domain, model, sessionId, options.signal, locale);
   const topLevelCategories = skeleton.children ?? [];
 
   if (topLevelCategories.length === 0) {
@@ -216,6 +222,7 @@ export async function runTaxonomy(options: RunTaxonomyOptions): Promise<void> {
         index,
         topLevelCategories.length,
         options.signal,
+        locale,
       );
     },
     (partialResults) => {

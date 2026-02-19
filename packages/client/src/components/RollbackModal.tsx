@@ -1,5 +1,6 @@
 import { STAGES, STAGE_ORDER } from '@ideafactory/shared';
 import type { Stage } from '@ideafactory/shared';
+import { useT } from '../i18n/index.js';
 
 interface RollbackModalProps {
   targetStage: Stage;
@@ -14,8 +15,17 @@ export function RollbackModal({
   onDuplicateAndEdit,
   onCancel,
 }: RollbackModalProps) {
+  const t = useT();
   const targetInfo = STAGES.find((s) => s.id === targetStage);
   const targetIdx = STAGE_ORDER.indexOf(targetStage);
+
+  const stageLabels: Record<string, string> = {
+    taxonomy: t('stage.taxonomy'),
+    methods: t('stage.methods'),
+    rubric: t('stage.rubric'),
+    factory: t('stage.factory'),
+  };
+  const localizedStageName = stageLabels[targetStage] ?? targetInfo?.label ?? targetStage;
 
   const discardedStages = STAGES.filter((s) => {
     const idx = STAGE_ORDER.indexOf(s.id as Stage);
@@ -32,14 +42,14 @@ export function RollbackModal({
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-lg font-semibold mb-3">
-          Go back to {targetInfo?.label ?? targetStage}?
+          {t('rollback.goBackTo', { stage: localizedStageName })}
         </h2>
 
         {discardedStages.length > 0 && (
           <p className="text-sm text-gray-400 mb-5">
-            Progress after {targetInfo?.label} will be discarded:{' '}
+            {t('rollback.progressDiscarded', { stage: localizedStageName })}{' '}
             <span className="text-gray-300">
-              {discardedStages.map((s) => s.label).join(', ')}
+              {discardedStages.map((s) => stageLabels[s.id] ?? s.label).join(', ')}
             </span>
           </p>
         )}
@@ -49,9 +59,9 @@ export function RollbackModal({
             onClick={onEditSession}
             className="w-full text-left p-4 rounded-lg border border-bg-3 hover:border-accent/50 hover:bg-accent/5 transition-colors"
           >
-            <div className="font-medium mb-1">Edit this session</div>
+            <div className="font-medium mb-1">{t('rollback.editSession')}</div>
             <div className="text-sm text-gray-400">
-              Roll back and discard progress after {targetInfo?.label}.
+              {t('rollback.editSessionDesc', { stage: localizedStageName })}
             </div>
           </button>
 
@@ -59,15 +69,15 @@ export function RollbackModal({
             onClick={onDuplicateAndEdit}
             className="w-full text-left p-4 rounded-lg border border-bg-3 hover:border-accent/50 hover:bg-accent/5 transition-colors"
           >
-            <div className="font-medium mb-1">Make a copy first</div>
+            <div className="font-medium mb-1">{t('rollback.makeCopy')}</div>
             <div className="text-sm text-gray-400">
-              Duplicate this session, then edit the copy. Original preserved.
+              {t('rollback.makeCopyDesc')}
             </div>
           </button>
         </div>
 
         <button onClick={onCancel} className="btn-ghost w-full">
-          Cancel
+          {t('rollback.cancel')}
         </button>
       </div>
     </div>

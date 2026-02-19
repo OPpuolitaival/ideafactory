@@ -565,6 +565,8 @@ const sessionRouter = router({
 
       const controller = pipelineRegistry.register(`${input.sessionId}:review`);
 
+      const locale = sessionConfig.locale;
+
       // Fire-and-forget: QA then packaging sequentially
       (async () => {
         await runQAForIdeas({
@@ -573,6 +575,7 @@ const sessionRouter = router({
           rubric,
           model,
           signal: controller.signal,
+          locale,
         });
         await packageIdeas({
           sessionId: input.sessionId,
@@ -581,6 +584,7 @@ const sessionRouter = router({
           coordinate: session.coordinate ?? '',
           model,
           signal: controller.signal,
+          locale,
         });
         // Signal review completion to the client
         sseManager.emit(input.sessionId, {

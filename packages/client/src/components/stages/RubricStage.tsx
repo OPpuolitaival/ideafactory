@@ -1,8 +1,10 @@
 import { useSessionStore } from '../../store/index.js';
 import { trpc } from '../../trpc/index.js';
+import { useT } from '../../i18n/index.js';
 
 export function RubricStage({ readOnly }: { readOnly?: boolean } = {}) {
   const { rubric, isLoading, sessionId, setRubric, setStage, setLoading } = useSessionStore();
+  const t = useT();
   const advanceMutation = trpc.session.advance.useMutation();
   const updateRubricMutation = trpc.session.updateRubric.useMutation();
 
@@ -66,8 +68,8 @@ export function RubricStage({ readOnly }: { readOnly?: boolean } = {}) {
   if (isLoading && !rubric) {
     return (
       <div className="max-w-4xl mx-auto">
-        <h2 className="text-2xl font-bold mb-2">Stage 3: Rubric</h2>
-        <p className="text-gray-400 mb-6">Designing evaluation criteria...</p>
+        <h2 className="text-2xl font-bold mb-2">{t('rubric.title')}</h2>
+        <p className="text-gray-400 mb-6">{t('rubric.loading')}</p>
         <div className="space-y-4">
           {[1, 2, 3].map((i) => (
             <div key={i} className="skeleton h-40 w-full" />
@@ -81,14 +83,14 @@ export function RubricStage({ readOnly }: { readOnly?: boolean } = {}) {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <h2 className="text-2xl font-bold mb-2">Stage 3: Rubric</h2>
+      <h2 className="text-2xl font-bold mb-2">{t('rubric.title')}</h2>
       <p className="text-gray-400 mb-6">
-        Review and edit the evaluation framework. This defines "good" before generating ideas.
+        {t('rubric.description')}
       </p>
 
       {/* Hard Gates */}
       <section className="mb-8">
-        <h3 className="text-lg font-semibold mb-3 text-danger">Hard Gates (Pass/Fail)</h3>
+        <h3 className="text-lg font-semibold mb-3 text-danger">{t('rubric.hardGates')}</h3>
         <div className="space-y-2">
           {rubric.gates.map((gate, i) => (
             <div key={gate.id} className="flex items-center gap-2">
@@ -111,7 +113,7 @@ export function RubricStage({ readOnly }: { readOnly?: boolean } = {}) {
           ))}
           {!readOnly && (
             <button onClick={addGate} className="btn-ghost text-sm">
-              + Add Gate
+              {t('rubric.addGate')}
             </button>
           )}
         </div>
@@ -119,7 +121,7 @@ export function RubricStage({ readOnly }: { readOnly?: boolean } = {}) {
 
       {/* Scored Criteria */}
       <section className="mb-8">
-        <h3 className="text-lg font-semibold mb-3 text-accent">Scored Criteria (1-5)</h3>
+        <h3 className="text-lg font-semibold mb-3 text-accent">{t('rubric.scoredCriteria')}</h3>
         <div className="space-y-4">
           {rubric.criteria.map((criterion, i) => (
             <div key={criterion.id} className="card">
@@ -138,17 +140,17 @@ export function RubricStage({ readOnly }: { readOnly?: boolean } = {}) {
                         value={criterion.text}
                         onChange={(e) => updateCriterion(i, 'text', e.target.value)}
                         className="input w-full font-medium"
-                        placeholder="Criterion name"
+                        placeholder={t('rubric.criterionPlaceholder')}
                       />
                       <input
                         type="text"
                         value={criterion.description}
                         onChange={(e) => updateCriterion(i, 'description', e.target.value)}
                         className="input w-full text-sm"
-                        placeholder="Description (1=bad, 5=good)"
+                        placeholder={t('rubric.descriptionPlaceholder')}
                       />
                       <div className="flex items-center gap-3">
-                        <label className="text-xs text-gray-500">Weight:</label>
+                        <label className="text-xs text-gray-500">{t('rubric.weight')}:</label>
                         <input
                           type="range"
                           min={1}
@@ -172,7 +174,7 @@ export function RubricStage({ readOnly }: { readOnly?: boolean } = {}) {
           ))}
           {!readOnly && (
             <button onClick={addCriterion} className="btn-ghost text-sm">
-              + Add Criterion
+              {t('rubric.addCriterion')}
             </button>
           )}
         </div>
@@ -185,7 +187,7 @@ export function RubricStage({ readOnly }: { readOnly?: boolean } = {}) {
             disabled={advanceMutation.isPending}
             className="btn-primary"
           >
-            {advanceMutation.isPending ? 'Starting Factory...' : 'Next: Run Factory'}
+            {advanceMutation.isPending ? t('rubric.startingFactory') : t('rubric.nextFactory')}
           </button>
         </div>
       )}

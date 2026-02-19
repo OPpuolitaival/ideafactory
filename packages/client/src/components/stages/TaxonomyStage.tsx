@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useSessionStore } from '../../store/index.js';
 import { trpc } from '../../trpc/index.js';
+import { useT } from '../../i18n/index.js';
 import type { TaxonomyNode } from '@ideafactory/shared';
 
 export function TaxonomyStage({ readOnly }: { readOnly?: boolean } = {}) {
@@ -8,6 +9,7 @@ export function TaxonomyStage({ readOnly }: { readOnly?: boolean } = {}) {
     useSessionStore();
   const advanceMutation = trpc.session.advance.useMutation();
   const [filter, setFilter] = useState('');
+  const t = useT();
 
   const handleLock = async () => {
     if (!sessionId || selectedPath.length === 0) return;
@@ -24,8 +26,8 @@ export function TaxonomyStage({ readOnly }: { readOnly?: boolean } = {}) {
   if (isLoading && !taxonomy) {
     return (
       <div className="max-w-4xl mx-auto">
-        <h2 className="text-2xl font-bold mb-2">Stage 1: Taxonomy</h2>
-        <p className="text-gray-400 mb-6">Mapping the problem space...</p>
+        <h2 className="text-2xl font-bold mb-2">{t('taxonomy.title')}</h2>
+        <p className="text-gray-400 mb-6">{t('taxonomy.loading')}</p>
         <div className="space-y-3">
           {Array.from({ length: 8 }).map((_, i) => (
             <div key={i} className="skeleton h-10 w-full" style={{ animationDelay: `${i * 100}ms` }} />
@@ -37,15 +39,15 @@ export function TaxonomyStage({ readOnly }: { readOnly?: boolean } = {}) {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <h2 className="text-2xl font-bold mb-2">Stage 1: Taxonomy</h2>
+      <h2 className="text-2xl font-bold mb-2">{t('taxonomy.title')}</h2>
       <p className="text-gray-400 mb-4">
-        Browse the problem space and select a coordinate to explore.
+        {t('taxonomy.description')}
       </p>
 
       {selectedPath.length > 0 && (
         <div className="mb-4 px-4 py-2 bg-accent/10 border border-accent/30 rounded-lg">
           <span className="text-sm text-accent-light font-medium">
-            Selected: {selectedPath.join(' > ')}
+            {t('taxonomy.selected')}: {selectedPath.join(' > ')}
           </span>
         </div>
       )}
@@ -55,7 +57,7 @@ export function TaxonomyStage({ readOnly }: { readOnly?: boolean } = {}) {
           type="text"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter taxonomy..."
+          placeholder={t('taxonomy.filterPlaceholder')}
           className="input w-full"
         />
       </div>
@@ -63,7 +65,7 @@ export function TaxonomyStage({ readOnly }: { readOnly?: boolean } = {}) {
       {isLoading && taxonomy && (
         <div className="mb-4 flex items-center gap-2 text-sm text-gray-400">
           <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-500 border-t-accent" />
-          Expanding taxonomy branches...
+          {t('taxonomy.expanding')}
         </div>
       )}
 
@@ -86,7 +88,7 @@ export function TaxonomyStage({ readOnly }: { readOnly?: boolean } = {}) {
             disabled={selectedPath.length === 0 || advanceMutation.isPending}
             className="btn-primary"
           >
-            {advanceMutation.isPending ? 'Advancing...' : 'Lock & Continue'}
+            {advanceMutation.isPending ? t('taxonomy.advancing') : t('taxonomy.lockContinue')}
           </button>
         </div>
       )}

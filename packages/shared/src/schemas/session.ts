@@ -6,6 +6,11 @@ export type Stage = z.infer<typeof StageSchema>;
 export const FactoryPhaseSchema = z.enum(['diverge', 'converge', 'evolve', 'interactive']);
 export type FactoryPhase = z.infer<typeof FactoryPhaseSchema>;
 
+export const LocaleSchema = z.enum(['en', 'fi']);
+export type Locale = z.infer<typeof LocaleSchema>;
+
+export const SUPPORTED_LOCALES = ['en', 'fi'] as const;
+
 export const SessionModelsSchema = z.object({
   navigator: z.string(),
   strategist: z.string(),
@@ -19,6 +24,7 @@ export const SessionConfigSchema = z.object({
   ideasPerWorker: z.number().min(5).max(30).default(15),
   webSearch: z.boolean().default(false),
   models: SessionModelsSchema.optional(),
+  locale: LocaleSchema.optional(),
 });
 
 export type SessionConfig = z.infer<typeof SessionConfigSchema>;

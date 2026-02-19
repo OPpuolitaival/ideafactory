@@ -1,16 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSessionStore } from '../../store/index.js';
 import { trpc } from '../../trpc/index.js';
+import { useT } from '../../i18n/index.js';
 import type { RawIdea, ScoredIdea, QAResult, IdeaPackage } from '@ideafactory/shared';
-
-const PHASE_LABELS: Record<string, string> = {
-  idle: 'Waiting...',
-  diverge: 'Diverge — Generating Ideas',
-  converge: 'Converge — Filtering & Scoring',
-  evolve: 'Evolve — Polishing Concepts',
-  interactive: 'Review — QA & Package',
-  complete: 'Session Complete',
-};
 
 const PHASES = ['diverge', 'converge', 'evolve', 'interactive'] as const;
 
@@ -38,6 +30,7 @@ function useElapsedTimer(startedAt: number | null): string | null {
 }
 
 export function FactoryStage() {
+  const t = useT();
   const {
     factoryPhase,
     factoryProgress,
@@ -54,6 +47,15 @@ export function FactoryStage() {
     isLoading,
     error,
   } = useSessionStore();
+
+  const phaseLabels: Record<string, string> = {
+    idle: t('factory.phaseIdle'),
+    diverge: t('factory.phaseDiverge'),
+    converge: t('factory.phaseConverge'),
+    evolve: t('factory.phaseEvolve'),
+    interactive: t('factory.phaseInteractive'),
+    complete: t('factory.phaseComplete'),
+  };
 
   const isAutomating =
     factoryPhase !== 'idle' &&
@@ -75,14 +77,14 @@ export function FactoryStage() {
   return (
     <div className="max-w-6xl mx-auto">
       <h2 className="text-2xl font-bold mb-2">
-        Stage 4: Factory
+        {t('factory.title')}
         {elapsed && (
           <span className="text-base font-normal text-gray-500 ml-3">
-            ({elapsed} elapsed)
+            ({elapsed} {t('factory.elapsed')})
           </span>
         )}
       </h2>
-      <p className="text-gray-400 mb-1">{PHASE_LABELS[factoryPhase]}</p>
+      <p className="text-gray-400 mb-1">{phaseLabels[factoryPhase]}</p>
       {factoryProgress && (
         <p className="text-sm text-accent-light mb-6">{factoryProgress.detail}</p>
       )}
@@ -154,6 +156,7 @@ export function FactoryStage() {
 // ---- Stuck Factory Banner ----
 
 function StuckFactoryBanner({ sessionId, workerCount, ideaCount }: { sessionId: string; workerCount: number; ideaCount: number }) {
+  const t = useT();
   const resumeMutation = trpc.session.resume.useMutation();
   const retryMutation = trpc.session.retry.useMutation();
   const isLoading = useSessionStore((s) => s.isLoading);
@@ -179,9 +182,9 @@ function StuckFactoryBanner({ sessionId, workerCount, ideaCount }: { sessionId: 
   return (
     <div className="bg-warning/10 border border-warning/30 rounded-lg px-4 py-3 mb-6 flex items-center gap-3">
       <div className="flex-1 min-w-0">
-        <span className="text-warning text-sm font-medium">Factory interrupted</span>
+        <span className="text-warning text-sm font-medium">{t('factory.interrupted')}</span>
         <span className="text-gray-400 text-sm ml-2">
-          Found {workerCount} completed workers with {ideaCount} ideas.
+          {t('factory.foundWorkers', { workerCount: String(workerCount), ideaCount: String(ideaCount) })}
         </span>
       </div>
       <button
@@ -189,14 +192,14 @@ function StuckFactoryBanner({ sessionId, workerCount, ideaCount }: { sessionId: 
         disabled={isLoading}
         className="btn-secondary text-xs shrink-0 border-accent/50 text-accent-light hover:bg-accent/20 disabled:opacity-50"
       >
-        {isLoading ? 'Resuming...' : 'Resume (preserve progress)'}
+        {isLoading ? t('factory.resuming') : t('factory.resumePreserve')}
       </button>
       <button
         onClick={handleRetry}
         disabled={isLoading}
         className="btn-secondary text-xs shrink-0 border-red-700/50 text-red-200 hover:bg-red-800/50 disabled:opacity-50"
       >
-        {isLoading ? 'Retrying...' : 'Retry (start fresh)'}
+        {isLoading ? t('factory.retrying') : t('factory.retryFresh')}
       </button>
     </div>
   );
@@ -205,12 +208,13 @@ function StuckFactoryBanner({ sessionId, workerCount, ideaCount }: { sessionId: 
 // ---- Sub-components ----
 
 function DivergenceView({ workerIdeas }: { workerIdeas: Map<string, RawIdea[]> }) {
+  const t = useT();
   const entries = Array.from(workerIdeas.entries());
 
   if (entries.length === 0) {
     return (
       <div className="text-center text-gray-500 py-12">
-        Waiting for workers to begin generating ideas...
+        {t('factory.waitingWorkers')}
       </div>
     );
   }
@@ -224,7 +228,7 @@ function DivergenceView({ workerIdeas }: { workerIdeas: Map<string, RawIdea[]> }
         <div key={workerId}>
           <h4 className="font-medium text-sm mb-3 text-accent-light">
             {ideas[0]?.persona ?? workerId}
-            <span className="text-gray-500 ml-2">({ideas.length} ideas)</span>
+            <span className="text-gray-500 ml-2">({ideas.length} {t('factory.ideas')})</span>
           </h4>
           <div className="space-y-2 max-h-[60vh] overflow-y-auto">
             {ideas.map((idea) => (
@@ -257,6 +261,7 @@ function DivergenceView({ workerIdeas }: { workerIdeas: Map<string, RawIdea[]> }
 }
 
 function ConvergenceView({ ideas }: { ideas: ScoredIdea[] }) {
+  const t = useT();
   const sorted = [...ideas].sort((a, b) => {
     if (a.eliminated && !b.eliminated) return 1;
     if (!a.eliminated && b.eliminated) return -1;
@@ -276,7 +281,7 @@ function ConvergenceView({ ideas }: { ideas: ScoredIdea[] }) {
             </div>
             <div className="text-right shrink-0 ml-4">
               {idea.eliminated ? (
-                <span className="badge bg-danger/20 text-danger">Eliminated</span>
+                <span className="badge bg-danger/20 text-danger">{t('factory.eliminated')}</span>
               ) : (
                 <span className="text-lg font-bold text-accent">
                   {idea.totalScore.toFixed(1)}
@@ -300,13 +305,14 @@ function EvolutionView({
   ideas: ScoredIdea[];
   scoredIdeas: ScoredIdea[];
 }) {
+  const t = useT();
   const [showEliminated, setShowEliminated] = useState(false);
   const eliminated = scoredIdeas.filter((i) => i.eliminated);
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-400">
-        Concepts have been evolved — weaknesses addressed, strengths amplified.
+        {t('factory.evolved')}
       </p>
       {ideas.map((idea) => (
         <div key={idea.id} className="card border-accent/20">
@@ -327,7 +333,7 @@ function EvolutionView({
             className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-300 transition-colors"
           >
             <span className="text-base">{showEliminated ? '\u25BE' : '\u25B8'}</span>
-            Eliminated during convergence ({eliminated.length})
+            {t('factory.eliminatedDuring')} ({eliminated.length})
           </button>
           {showEliminated && (
             <div className="space-y-2 mt-3">
@@ -339,7 +345,7 @@ function EvolutionView({
                       <p className="text-sm text-gray-400 mt-1">{idea.description}</p>
                     </div>
                     <div className="text-right shrink-0 ml-4">
-                      <span className="badge bg-danger/20 text-danger">Eliminated</span>
+                      <span className="badge bg-danger/20 text-danger">{t('factory.eliminated')}</span>
                     </div>
                   </div>
                   {idea.eliminationReason && (
@@ -372,6 +378,7 @@ function InteractiveView({
   reviewInProgress: boolean;
   isCompleted: boolean;
 }) {
+  const t = useT();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showEliminated, setShowEliminated] = useState(false);
@@ -467,7 +474,7 @@ function InteractiveView({
       {/* Critical Reviews */}
       {reviewedIdeas.length > 0 && (
         <section>
-          <h3 className="text-lg font-semibold mb-4">Critical Reviews</h3>
+          <h3 className="text-lg font-semibold mb-4">{t('factory.criticalReviews')}</h3>
           <div className="space-y-3">
             {reviewedIdeas.map(({ qa, idea, pkg }) => (
               <div key={qa.conceptId} className="card">
@@ -475,7 +482,7 @@ function InteractiveView({
                   <h4 className="font-medium">{idea?.name ?? qa.conceptId}</h4>
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-gray-400">
-                      Feasibility: {qa.feasibilityScore}/5
+                      {t('factory.feasibility')}: {qa.feasibilityScore}/5
                     </span>
                     <span
                       className={`badge ${
@@ -521,10 +528,10 @@ function InteractiveView({
                 {pkg && (
                   <div className="flex items-center gap-2 pt-2 border-t border-bg-3">
                     <button onClick={() => downloadHTML(pkg)} className="btn-ghost text-xs">
-                      Download HTML
+                      {t('factory.downloadHtml')}
                     </button>
                     <button onClick={() => copyPrompt(pkg)} className="btn-ghost text-xs">
-                      Copy Prompt
+                      {t('factory.copyPrompt')}
                     </button>
                   </div>
                 )}
@@ -536,9 +543,9 @@ function InteractiveView({
 
       {/* Combined Idea Pool */}
       <section>
-        <h3 className="text-lg font-semibold mb-2">Idea Pool</h3>
+        <h3 className="text-lg font-semibold mb-2">{t('factory.ideaPool')}</h3>
         <p className="text-sm text-gray-400 mb-4">
-          Select ideas, then run Critical Review to analyze feasibility and generate reports.
+          {t('factory.ideaPoolDesc')}
         </p>
 
         {!isCompleted && (
@@ -549,8 +556,8 @@ function InteractiveView({
               className="btn-primary text-sm"
             >
               {reviewInProgress
-                ? 'Reviewing...'
-                : `Run Critical Review (${selected.size})`}
+                ? t('factory.reviewing')
+                : `${t('factory.runReview')} (${selected.size})`}
             </button>
             {reviewInProgress && factoryProgress && (
               <span className="text-sm text-accent-light">{factoryProgress.detail}</span>
@@ -585,7 +592,7 @@ function InteractiveView({
                 <button
                   onClick={(e) => toggleExpanded(idea.id, e)}
                   className="text-gray-500 hover:text-gray-300 text-base shrink-0 p-1"
-                  title={isExpanded ? 'Collapse' : 'Expand'}
+                  title={isExpanded ? t('factory.collapse') : t('factory.expand')}
                 >
                   {isExpanded ? '\u25BE' : '\u25B8'}
                 </button>
@@ -596,12 +603,12 @@ function InteractiveView({
                     </h4>
                     {hasQA && (
                       <span className="badge bg-success/20 text-success text-xs shrink-0">
-                        Reviewed
+                        {t('factory.reviewed')}
                       </span>
                     )}
                     {hasPkg && (
                       <span className="badge bg-accent/20 text-accent text-xs shrink-0">
-                        Packaged
+                        {t('factory.packaged')}
                       </span>
                     )}
                   </div>
@@ -626,7 +633,7 @@ function InteractiveView({
             className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-300 transition-colors"
           >
             <span className="text-base">{showEliminated ? '\u25BE' : '\u25B8'}</span>
-            Eliminated Ideas ({eliminated.length})
+            {t('factory.eliminatedIdeas')} ({eliminated.length})
           </button>
           {showEliminated && (
             <div className="space-y-2 mt-3">
@@ -655,7 +662,7 @@ function InteractiveView({
                     <button
                       onClick={(e) => toggleExpanded(idea.id, e)}
                       className="text-gray-500 hover:text-gray-300 text-base shrink-0 p-1"
-                      title={isExpanded ? 'Collapse' : 'Expand'}
+                      title={isExpanded ? t('factory.collapse') : t('factory.expand')}
                     >
                       {isExpanded ? '\u25BE' : '\u25B8'}
                     </button>
@@ -666,12 +673,12 @@ function InteractiveView({
                         </h4>
                         {hasQA && (
                           <span className="badge bg-success/20 text-success text-xs shrink-0">
-                            Reviewed
+                            {t('factory.reviewed')}
                           </span>
                         )}
                         {hasPkg && (
                           <span className="badge bg-accent/20 text-accent text-xs shrink-0">
-                            Packaged
+                            {t('factory.packaged')}
                           </span>
                         )}
                       </div>
@@ -688,7 +695,7 @@ function InteractiveView({
                           {idea.totalScore.toFixed(1)}
                         </span>
                       ) : (
-                        <span className="badge bg-danger/20 text-danger">Eliminated</span>
+                        <span className="badge bg-danger/20 text-danger">{t('factory.eliminated')}</span>
                       )}
                     </div>
                   </div>
@@ -707,7 +714,7 @@ function InteractiveView({
             disabled={completeMutation.isPending}
             className="btn-primary"
           >
-            {completeMutation.isPending ? 'Completing...' : 'Complete Session'}
+            {completeMutation.isPending ? t('factory.completing') : t('factory.completeSession')}
           </button>
         </div>
       )}

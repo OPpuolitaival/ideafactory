@@ -8,6 +8,7 @@ import { coerceAndParse } from './coerce.js';
 import { methodRecommendationJsonSchema, rubricJsonSchema } from './schemas.js';
 import { sseManager } from '../sse/index.js';
 import { getDb, schema } from '../db/index.js';
+import { getLocaleInstruction } from './locale.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const METHOD_SELECTOR_SKILL = fs.readFileSync(
@@ -25,10 +26,12 @@ interface RunMethodSelectionOptions {
   methods: Method[];
   model: string;
   signal?: AbortSignal;
+  locale?: string;
 }
 
 export async function runMethodSelection(options: RunMethodSelectionOptions): Promise<void> {
-  const { sessionId, coordinate, methods, model } = options;
+  const { sessionId, coordinate, methods, model, locale } = options;
+  const localeInstr = getLocaleInstruction(locale);
 
   sseManager.emit(sessionId, {
     type: 'agent:thought',
@@ -44,7 +47,7 @@ export async function runMethodSelection(options: RunMethodSelectionOptions): Pr
   const recommendation = await callLLMWithRetry(
     {
       model,
-      system: METHOD_SELECTOR_SKILL,
+      system: METHOD_SELECTOR_SKILL + localeInstr,
       timeoutMs: 120_000,
       signal: options.signal,
       prompt: `The user has selected this coordinate in the taxonomy: "${coordinate}"
@@ -78,12 +81,22 @@ Return ONLY the JSON object. No markdown, no code blocks, no extra text.`,
 
   // Persist to database
   const db = getDb();
-  await db.insert(schema.methodSelections).values({
-    sessionId,
-    recommended: JSON.stringify(recommendation.recommended),
-    reasoning: JSON.stringify(recommendation.reasoning),
-    selected: JSON.stringify(recommendation.recommended), // default selection = recommended
-  });
+  await db
+    .insert(schema.methodSelections)
+    .values({
+      sessionId,
+      recommended: JSON.stringify(recommendation.recommended),
+      reasoning: JSON.stringify(recommendation.reasoning),
+      selected: JSON.stringify(recommendation.recommended), // default selection = recommended
+    })
+    .onConflictDoUpdate({
+      target: schema.methodSelections.sessionId,
+      set: {
+        recommended: JSON.stringify(recommendation.recommended),
+        reasoning: JSON.stringify(recommendation.reasoning),
+        selected: JSON.stringify(recommendation.recommended),
+      },
+    });
 
   // Emit to client
   sseManager.emit(sessionId, {
@@ -104,10 +117,12 @@ interface RunRubricDesignOptions {
   methods: Method[];
   model: string;
   signal?: AbortSignal;
+  locale?: string;
 }
 
 export async function runRubricDesign(options: RunRubricDesignOptions): Promise<void> {
-  const { sessionId, coordinate, domain, methods, model } = options;
+  const { sessionId, coordinate, domain, methods, model, locale } = options;
+  const localeInstr = getLocaleInstruction(locale);
 
   sseManager.emit(sessionId, {
     type: 'agent:thought',
@@ -119,7 +134,7 @@ export async function runRubricDesign(options: RunRubricDesignOptions): Promise<
   const rubric = await callLLMWithRetry(
     {
       model,
-      system: RUBRIC_DESIGNER_SKILL,
+      system: RUBRIC_DESIGNER_SKILL + localeInstr,
       timeoutMs: 120_000,
       signal: options.signal,
       prompt: `Design an evaluation rubric for ideas in this problem space:

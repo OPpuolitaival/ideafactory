@@ -1,8 +1,9 @@
 import { useSessionStore } from '../store/index.js';
 import { trpc } from '../trpc/index.js';
-import { STAGES } from '@ideafactory/shared';
+import { useT } from '../i18n/index.js';
 
 export function ErrorBanner() {
+  const t = useT();
   const error = useSessionStore((s) => s.error);
   const errorStage = useSessionStore((s) => s.errorStage);
   const sessionId = useSessionStore((s) => s.sessionId);
@@ -18,7 +19,13 @@ export function ErrorBanner() {
 
   if (!error) return null;
 
-  const stageLabel = STAGES.find((s) => s.id === errorStage)?.label ?? errorStage;
+  const stageLabels: Record<string, string> = {
+    taxonomy: t('stage.taxonomy'),
+    methods: t('stage.methods'),
+    rubric: t('stage.rubric'),
+    factory: t('stage.factory'),
+  };
+  const stageLabel = errorStage ? (stageLabels[errorStage] ?? errorStage) : null;
   const canResume = errorStage === 'factory' && progressQuery.data != null && progressQuery.data.resumeFrom !== null;
   const divergeCount = progressQuery.data?.divergeIdeaCount ?? 0;
 
@@ -65,10 +72,10 @@ export function ErrorBanner() {
           {isLoading ? (
             <span className="flex items-center gap-1.5">
               <span className="inline-block w-3 h-3 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
-              Resuming...
+              {t('error.resuming')}
             </span>
           ) : (
-            `Resume (preserve ${divergeCount} ideas)`
+            t('error.resumePreserve', { count: String(divergeCount) })
           )}
         </button>
       )}
@@ -80,17 +87,17 @@ export function ErrorBanner() {
         {isLoading ? (
           <span className="flex items-center gap-1.5">
             <span className="inline-block w-3 h-3 border-2 border-red-300/30 border-t-red-300 rounded-full animate-spin" />
-            Retrying...
+            {t('error.retrying')}
           </span>
         ) : (
-          `Retry${canResume ? ' (start fresh)' : ''}`
+          canResume ? t('error.retryFresh') : t('error.retry')
         )}
       </button>
       <button
         onClick={handleDismiss}
         className="text-red-400 hover:text-red-200 text-xs shrink-0"
       >
-        Dismiss
+        {t('error.dismiss')}
       </button>
     </div>
   );
